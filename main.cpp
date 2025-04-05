@@ -320,7 +320,7 @@ public:
             accept();
         });
 
-        // --- Modification: Immediately apply immediate dose changes when extended bolus is chosen.
+        // extended dose: Immediately apply specified immediate dose
         connect(extendedButton, &QPushButton::clicked, this, [this]() {
             ExtendedBolusDialog extDlg(this);
             if(extDlg.exec() == QDialog::Accepted) {
@@ -331,13 +331,13 @@ public:
                 double extendedDose = m_finalBolus * extendedPct / 100.0;
                 double currentRate = (duration > 0) ? extendedDose / duration : 0.0;
 
-                // Immediately update IOB and insulin for the immediate portion.
+                // update IOB
                 if (m_iob)
                     m_iob->updateIOB(m_iob->getIOB() + immediateDose);
                 if (m_cartridge)
                     m_cartridge->updateInsulinLevel(m_cartridge->getInsulinLevel() - immediateDose);
 
-                // Emit the parameters for the extended bolus.
+
                 emit extendedBolusParameters(duration, immediateDose, extendedDose, currentRate);
                 accept();
             }
@@ -347,9 +347,9 @@ public:
     QLineEdit* getCarbsEdit() { return carbsEdit; }
 
 signals:
-    // Existing signal for extended bolus parameters.
+    // signal the extended bolus
     void extendedBolusParameters(double duration, double immediateDose, double extendedDose, double ratePerHour);
-    // New signal to pass the user-entered Current BG to update the CGM sensor.
+    // pass the user-entered Current BG update CGM sensor
     void mealInfoEntered(double currentBG);
 
 private slots:
@@ -361,7 +361,7 @@ private slots:
             QMessageBox::warning(this, "Input Error", "Enter valid numbers for Carbs and BG.");
             return;
         }
-        // Emit the user-entered BG value to update the CGM sensor.
+        //
         emit mealInfoEntered(currentBG);
 
         double carbRatio = 10.0, correctionFactor = 2.0, targetBG = 6.0;
@@ -596,12 +596,14 @@ public slots:
 
     void onBolus() {
         BolusCalculationDialog dlg(m_currentProfile, m_iob, m_cartridge, this);
-        // Connect the new signal to update the CGM sensor with the user-entered BG value.
+
+        // Connect the new signal to update the CGM sensor with user inputted bg
         connect(&dlg, &BolusCalculationDialog::mealInfoEntered, this, [this](double newBG) {
             m_sensor->updateGlucoseData(newBG);
             updateStatus();
         });
-        // Connect the extended bolus parameters signal to simulate extended delivery.
+
+        // simulate extended dleivery
         connect(&dlg, &BolusCalculationDialog::extendedBolusParameters, this,
                 [this](double duration, double immediateDose, double extendedDose, double ratePerHour) {
                     int totalTicks = static_cast<int>(duration);
@@ -610,7 +612,8 @@ public slots:
                                .arg(extendedDose)
                                .arg(totalTicks)
                                .arg(ratePerHour, 0, 'f', 2));
-                    // Set up the timer for gradual extended delivery.
+
+                    //timer
                     QTimer* timer = new QTimer(this);
                     int* tick = new int(0);
                     connect(timer, &QTimer::timeout, this, [=]() mutable {
@@ -634,7 +637,7 @@ public slots:
                     });
                     timer->start(10000);
 
-                    // CGM simulation: every 10 seconds, reduce CGM by 0.5 until reaching target BG.
+                    // CGM simulation: every 10 seconds, reduce CGM by 0.5 til BG target
                     QTimer* cgmTimer = new QTimer(this);
                     connect(cgmTimer, &QTimer::timeout, this, [=]() {
                         double currentBG = m_sensor->getGlucoseLevel();
@@ -681,11 +684,11 @@ public slots:
             return;
         }
 
-        // Indicate charging by coloring the button green.
+        // Charge is ON
         chargeButton->setStyleSheet("background-color: green; color: white;");
         addLog("🔌 Charging started...");
 
-        // Start a timer to simulate real-time charging.
+        // Charging battery
         m_chargingTimer = new QTimer(this);
         connect(m_chargingTimer, &QTimer::timeout, this, [=]() {
             if (m_battery->getStatus() < 100) {
@@ -746,7 +749,7 @@ private:
     IOB* m_iob;
     CGMSensor* m_sensor;
     Profile* m_currentProfile = nullptr;
-    QTimer* m_chargingTimer;  // Added member variable to track the charging timer.
+    QTimer* m_chargingTimer;
 };
 
 //--------------------------------------------------------
