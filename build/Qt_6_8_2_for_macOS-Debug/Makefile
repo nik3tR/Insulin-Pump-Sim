@@ -904,6 +904,14 @@ main.moc: ../../main.cpp \
 		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtWidgets.framework/Headers/qdialogbuttonbox.h \
 		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtCore.framework/Headers/QTimer \
 		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtCore.framework/Headers/qtimer.h \
+		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtWidgets.framework/Headers/QMessageBox \
+		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtWidgets.framework/Headers/qmessagebox.h \
+		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtWidgets.framework/Headers/QStackedWidget \
+		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtWidgets.framework/Headers/qstackedwidget.h \
+		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtWidgets.framework/Headers/QTextEdit \
+		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtWidgets.framework/Headers/qtextedit.h \
+		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtGui.framework/Headers/QFont \
+		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtGui.framework/Headers/qfont.h \
 		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtCore.framework/Headers/QObject \
 		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtCore.framework/Headers/qobject.h \
 		/Users/shirleyhuang/Qt/6.8.2/macos/libexec/moc
@@ -950,6 +958,14 @@ main.o: ../../main.cpp /Users/shirleyhuang/Qt/6.8.2/macos/lib/QtWidgets.framewor
 		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtWidgets.framework/Headers/qdialogbuttonbox.h \
 		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtCore.framework/Headers/QTimer \
 		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtCore.framework/Headers/qtimer.h \
+		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtWidgets.framework/Headers/QMessageBox \
+		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtWidgets.framework/Headers/qmessagebox.h \
+		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtWidgets.framework/Headers/QStackedWidget \
+		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtWidgets.framework/Headers/qstackedwidget.h \
+		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtWidgets.framework/Headers/QTextEdit \
+		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtWidgets.framework/Headers/qtextedit.h \
+		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtGui.framework/Headers/QFont \
+		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtGui.framework/Headers/qfont.h \
 		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtCore.framework/Headers/QObject \
 		/Users/shirleyhuang/Qt/6.8.2/macos/lib/QtCore.framework/Headers/qobject.h \
 		main.moc

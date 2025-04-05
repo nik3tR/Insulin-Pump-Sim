@@ -33,7 +33,7 @@ enum PumpState {
     Error
 };
 
-class Profile;
+class Profile; // forward declaration
 
 //--------------------------------------------------------
 // INSULIN PUMP
@@ -203,7 +203,6 @@ private:
         correctionEdit = new QLineEdit(this);
         targetEdit = new QLineEdit(this);
 
-        // Updated labels per specification
         formLayout->addRow("Name:", nameEdit);
         formLayout->addRow("Basal Rate (u/hr):", basalEdit);
         formLayout->addRow("Carb Ratio (1u per X g):", carbEdit);
@@ -257,86 +256,14 @@ private:
 };
 
 //--------------------------------------------------------
-// EXTENDED BOLUS PROGRESS DIALOG
-//--------------------------------------------------------
-class ExtendedBolusProgressDialog : public QDialog {
-    Q_OBJECT
-public:
-    // Modified: Now accepts a pointer to IOB to update it in real time.
-    ExtendedBolusProgressDialog(double extendedDose, double simulationDuration, double currentRate, IOB* iob, QWidget* parent = nullptr)
-        : QDialog(parent), m_extendedDose(extendedDose), m_simulationDuration(simulationDuration), m_currentRate(currentRate), m_iob(iob)
-    {
-        // Store the initial IOB (which already includes the immediate dose)
-        m_initialIOB = m_iob->getIOB();
-
-        setWindowTitle("Extended Bolus Delivery In Progress");
-        QVBoxLayout* layout = new QVBoxLayout(this);
-        m_label = new QLabel(this);
-        m_label->setAlignment(Qt::AlignCenter);
-        layout->addWidget(m_label);
-        setLayout(layout);
-
-        m_elapsed = 0;
-        m_timer = new QTimer(this);
-        connect(m_timer, &QTimer::timeout, this, &ExtendedBolusProgressDialog::updateProgress);
-        m_timer->start(1000);  // update every 1 second
-        updateProgress();
-    }
-public slots:
-    void updateProgress() {
-        m_elapsed += 1; // seconds elapsed
-        double remainingTime = m_simulationDuration - m_elapsed;
-        if (remainingTime < 0) remainingTime = 0;
-        double delivered = m_extendedDose * (m_elapsed / m_simulationDuration);
-        double remainingDose = m_extendedDose - delivered;
-        if(remainingDose < 0) remainingDose = 0;
-
-        // Update IOB in real time: set IOB to initial IOB + delivered extended dose
-        m_iob->updateIOB(m_initialIOB + delivered);
-
-        // Format remainingTime as HH:MM:SS
-        int hours = static_cast<int>(remainingTime) / 3600;
-        int minutes = (static_cast<int>(remainingTime) % 3600) / 60;
-        int seconds = static_cast<int>(remainingTime) % 60;
-        QString timeStr = QString("%1:%2:%3")
-                              .arg(hours, 2, 10, QLatin1Char('0'))
-                              .arg(minutes, 2, 10, QLatin1Char('0'))
-                              .arg(seconds, 2, 10, QLatin1Char('0'));
-
-        QString progressText = "EXTENDED BOLUS DELIVERY IN PROGRESS\n"
-                               "------------------------------\n"
-                               "Remaining Extended Dose: " + QString::number(remainingDose, 'f', 1) + " units\n"
-                                                                          "Time Remaining: " + timeStr + "\n"
-                                           "Current Rate: ~" + QString::number(m_currentRate, 'f', 1) + " units/hour\n"
-                                                                          "------------------------------";
-        m_label->setText(progressText);
-
-        if(m_elapsed >= m_simulationDuration) {
-            m_timer->stop();
-            QMessageBox::information(this, "Delivery Complete", "Extended Bolus delivery complete.");
-            close();
-        }
-    }
-private:
-    QLabel* m_label;
-    QTimer* m_timer;
-    double m_extendedDose;
-    double m_simulationDuration; // in seconds (simulated duration)
-    double m_currentRate;
-    int m_elapsed;
-    IOB* m_iob;
-    double m_initialIOB;
-};
-
-//--------------------------------------------------------
-// BOLUS CALCULATION DIALOG (Modified to include Meal Info input and Result display)
+// BOLUS CALCULATION DIALOG (with Extended Bolus Simulation)
 //--------------------------------------------------------
 class BolusCalculationDialog : public QDialog {
     Q_OBJECT
 public:
-    // Modified: Now accepts an optional Profile pointer and an IOB pointer.
-    BolusCalculationDialog(Profile* profile = nullptr, IOB* iob = nullptr, QWidget* parent = nullptr)
-        : QDialog(parent), m_profile(profile), m_finalBolus(0.0), m_iob(iob)
+    // Constructor receives profile, IOB, and cartridge pointers.
+    BolusCalculationDialog(Profile* profile = nullptr, IOB* iob = nullptr, InsulinCartridge* cartridge = nullptr, QWidget* parent = nullptr)
+        : QDialog(parent), m_profile(profile), m_finalBolus(0.0), m_iob(iob), m_cartridge(cartridge)
     {
         setWindowTitle("Bolus Calculator");
         stackedWidget = new QStackedWidget(this);
@@ -360,26 +287,19 @@ public:
         inputLayout->addLayout(inputButtonLayout);
         stackedWidget->addWidget(inputPage);
 
-        // Page 2: Bolus Result and Delivery Method Selection
+        // Page 2: Result and Method Selection
         QWidget* resultPage = new QWidget(this);
         QVBoxLayout* resultLayout = new QVBoxLayout(resultPage);
         resultLabel = new QLabel(resultPage);
         resultLayout->addWidget(resultLabel);
-
-        // Add a small-font label to display the formulas
         formulaLabel = new QLabel(resultPage);
         QFont smallFont = formulaLabel->font();
         smallFont.setPointSize(smallFont.pointSize() - 2);
         formulaLabel->setFont(smallFont);
-        formulaLabel->setText("Formulas:\n"
-                              "Carb Bolus = Carbs (g) / ICR (g/u)\n"
-                              "Correction Bolus = (Current BG - Target BG) / Correction Factor\n"
-                              "Total Bolus = Carb Bolus + Correction Bolus\n"
-                              "Final Bolus = Total Bolus - IOB");
+        formulaLabel->setText("Formulas:\nCarb Bolus = Carbs / ICR\nCorrection = (BG - Target) / CF\nFinal = Total - IOB");
         resultLayout->addWidget(formulaLabel);
-
         QHBoxLayout* resultButtonLayout = new QHBoxLayout();
-        manualButton = new QPushButton("Manual Bolus", resultPage);
+        manualButton = new QPushButton("Immediate Bolus", resultPage);
         extendedButton = new QPushButton("Extended Bolus", resultPage);
         QPushButton* cancelButton2 = new QPushButton("Cancel", resultPage);
         resultButtonLayout->addWidget(manualButton);
@@ -392,48 +312,45 @@ public:
         mainLayout->addWidget(stackedWidget);
         setLayout(mainLayout);
 
-        // Connections
-        connect(cancelButton1, &QPushButton::clicked, this, &BolusCalculationDialog::reject);
-        connect(cancelButton2, &QPushButton::clicked, this, &BolusCalculationDialog::reject);
+        connect(cancelButton1, &QPushButton::clicked, this, &QDialog::reject);
+        connect(cancelButton2, &QPushButton::clicked, this, &QDialog::reject);
         connect(calculateButton, &QPushButton::clicked, this, &BolusCalculationDialog::calculateBolus);
         connect(manualButton, &QPushButton::clicked, this, [this]() {
             std::cout << "[BolusCalculationDialog] Manual Bolus selected.\n";
             accept();
         });
+
+        // --- Modification: Immediately apply immediate dose changes when extended bolus is chosen.
         connect(extendedButton, &QPushButton::clicked, this, [this]() {
-            std::cout << "[BolusCalculationDialog] Extended Bolus selected.\n";
             ExtendedBolusDialog extDlg(this);
             if(extDlg.exec() == QDialog::Accepted) {
                 double duration = extDlg.getDuration();
                 double immediatePct = extDlg.getImmediatePercentage();
                 double extendedPct = extDlg.getExtendedPercentage();
-
                 double immediateDose = m_finalBolus * immediatePct / 100.0;
                 double extendedDose = m_finalBolus * extendedPct / 100.0;
                 double currentRate = (duration > 0) ? extendedDose / duration : 0.0;
 
-                // Immediately add Immediate Dose to IOB.
-                if(m_iob)
+                // Immediately update IOB and insulin for the immediate portion.
+                if (m_iob)
                     m_iob->updateIOB(m_iob->getIOB() + immediateDose);
+                if (m_cartridge)
+                    m_cartridge->updateInsulinLevel(m_cartridge->getInsulinLevel() - immediateDose);
 
-                // Create ExtendedBolusProgressDialog and pass IOB pointer.
-                ExtendedBolusProgressDialog* progressDlg = new ExtendedBolusProgressDialog(extendedDose, duration * 10, currentRate, m_iob, this);
-                progressDlg->setAttribute(Qt::WA_DeleteOnClose);
-                progressDlg->show();
-
-                // Emit log signal with extended bolus details.
-                emit extendedBolusStarted(QString("Extended Bolus Started\nImmediate Dose = %1 u\nExtended Dose = %2 u\nDuration = %3 hrs\nRate Per Hour = %4 u/hr")
-                                              .arg(immediateDose, 0, 'f', 1)
-                                              .arg(extendedDose, 0, 'f', 1)
-                                              .arg(duration, 0, 'f', 1)
-                                              .arg(currentRate, 0, 'f', 1));
+                // Emit the parameters for the extended bolus.
+                emit extendedBolusParameters(duration, immediateDose, extendedDose, currentRate);
                 accept();
             }
         });
     }
 
+    QLineEdit* getCarbsEdit() { return carbsEdit; }
+
 signals:
-    void extendedBolusStarted(const QString& message);
+    // Existing signal for extended bolus parameters.
+    void extendedBolusParameters(double duration, double immediateDose, double extendedDose, double ratePerHour);
+    // New signal to pass the user-entered Current BG to update the CGM sensor.
+    void mealInfoEntered(double currentBG);
 
 private slots:
     void calculateBolus() {
@@ -441,13 +358,13 @@ private slots:
         double carbs = carbsEdit->text().toDouble(&ok1);
         double currentBG = bgEdit->text().toDouble(&ok2);
         if (!ok1 || !ok2) {
-            QMessageBox::warning(this, "Input Error", "Please enter valid numbers for Carbohydrates and Current BG.");
+            QMessageBox::warning(this, "Input Error", "Enter valid numbers for Carbs and BG.");
             return;
         }
-        // Default values per specification.
-        double carbRatio = 10.0;
-        double correctionFactor = 2.0;
-        double targetBG = 6.0;
+        // Emit the user-entered BG value to update the CGM sensor.
+        emit mealInfoEntered(currentBG);
+
+        double carbRatio = 10.0, correctionFactor = 2.0, targetBG = 6.0;
         if(m_profile) {
             carbRatio = m_profile->getCarbRatio();
             correctionFactor = m_profile->getCorrectionFactor();
@@ -456,19 +373,15 @@ private slots:
         double carbBolus = carbs / carbRatio;
         double correctionBolus = (currentBG > targetBG) ? (currentBG - targetBG) / correctionFactor : 0.0;
         double totalBolus = carbBolus + correctionBolus;
-        double iob = 0.0; // assumed
+        double iob = (m_iob) ? m_iob->getIOB() : 0.0;
         m_finalBolus = totalBolus - iob;
 
         QString resultText;
         resultText += "--- BOLUS RESULT ---\n";
-        resultText += "Meal Info:\n";
-        resultText += "Carbs: " + QString::number(carbs) + "g | Current BG: " + QString::number(currentBG) + " mmol/L | IOB: " + QString::number(iob) + "u\n\n";
-        resultText += "Calculation:\n";
-        resultText += "Carb Bolus: " + QString::number(carbBolus, 'f', 1) + " u\n";
-        resultText += "Correction Bolus: " + QString::number(correctionBolus, 'f', 1) + " u\n";
-        resultText += "Total Bolus: " + QString::number(totalBolus, 'f', 1) + " u\n\n";
-        resultText += "💉 Final Bolus: " + QString::number(m_finalBolus, 'f', 1) + " u\n";
-
+        resultText += QString("Carbs: %1g | BG: %2 mmol/L | IOB: %3 u\n\n").arg(carbs).arg(currentBG).arg(iob);
+        resultText += QString("Carb Bolus: %1 u\nCorrection Bolus: %2 u\nTotal: %3 u\n\nFinal: %4 u")
+                          .arg(carbBolus, 0, 'f', 1).arg(correctionBolus, 0, 'f', 1)
+                          .arg(totalBolus, 0, 'f', 1).arg(m_finalBolus, 0, 'f', 1);
         resultLabel->setText(resultText);
         stackedWidget->setCurrentIndex(1);
     }
@@ -481,10 +394,11 @@ private:
     Profile* m_profile;
     double m_finalBolus;
     IOB* m_iob;
+    InsulinCartridge* m_cartridge;
 };
 
 //--------------------------------------------------------
-// CHARGING DISPLAY DIALOG
+// CHARGING DISPLAY DIALOG (unchanged, but no longer invoked)
 //--------------------------------------------------------
 class ChargingDisplayDialog : public QDialog {
     Q_OBJECT
@@ -545,7 +459,8 @@ public:
         m_cartridge(cartridge),
         m_iob(iob),
         m_sensor(sensor),
-        m_currentProfile(nullptr)
+        m_currentProfile(nullptr),
+        m_chargingTimer(nullptr)   // Initialize charging timer to nullptr
     {
         // Pump Status Section
         QHBoxLayout* statusLayout = new QHBoxLayout();
@@ -680,10 +595,65 @@ public slots:
     }
 
     void onBolus() {
-        // Modified to pass current profile and IOB pointer to BolusCalculationDialog
-        BolusCalculationDialog dlg(m_currentProfile, m_iob, this);
-        // Connect the extended bolus signal to our log
-        connect(&dlg, &BolusCalculationDialog::extendedBolusStarted, this, &HomeScreenWidget::addLog);
+        BolusCalculationDialog dlg(m_currentProfile, m_iob, m_cartridge, this);
+        // Connect the new signal to update the CGM sensor with the user-entered BG value.
+        connect(&dlg, &BolusCalculationDialog::mealInfoEntered, this, [this](double newBG) {
+            m_sensor->updateGlucoseData(newBG);
+            updateStatus();
+        });
+        // Connect the extended bolus parameters signal to simulate extended delivery.
+        connect(&dlg, &BolusCalculationDialog::extendedBolusParameters, this,
+                [this](double duration, double immediateDose, double extendedDose, double ratePerHour) {
+                    int totalTicks = static_cast<int>(duration);
+                    addLog(QString("🔄 Starting Extended Bolus Delivery...\nImmediate: %1 u \nExtended: %2 u over %3 hrs at %4 u/hr")
+                               .arg(immediateDose)
+                               .arg(extendedDose)
+                               .arg(totalTicks)
+                               .arg(ratePerHour, 0, 'f', 2));
+                    // Set up the timer for gradual extended delivery.
+                    QTimer* timer = new QTimer(this);
+                    int* tick = new int(0);
+                    connect(timer, &QTimer::timeout, this, [=]() mutable {
+                        if (*tick < totalTicks) {
+                            if (m_iob)
+                                m_iob->updateIOB(m_iob->getIOB() + ratePerHour);
+                            if (m_cartridge)
+                                m_cartridge->updateInsulinLevel(m_cartridge->getInsulinLevel() - ratePerHour);
+                            updateStatus();
+                            addLog(QString("⏱️ %1/%2 hrs | +%3 u delivered (extended)")
+                                       .arg(*tick + 1)
+                                       .arg(totalTicks)
+                                       .arg(ratePerHour, 0, 'f', 2));
+                            (*tick)++;
+                        } else {
+                            timer->stop();
+                            timer->deleteLater();
+                            delete tick;
+                            addLog("✅ Extended Bolus Completed");
+                        }
+                    });
+                    timer->start(10000);
+
+                    // CGM simulation: every 10 seconds, reduce CGM by 0.5 until reaching target BG.
+                    QTimer* cgmTimer = new QTimer(this);
+                    connect(cgmTimer, &QTimer::timeout, this, [=]() {
+                        double currentBG = m_sensor->getGlucoseLevel();
+                        double targetBG = (m_currentProfile) ? m_currentProfile->getTargetGlucose() : 5.0;
+                        if (currentBG > targetBG) {
+                            double updated = currentBG - 0.5;
+                            if (updated < targetBG)
+                                updated = targetBG;
+                            m_sensor->updateGlucoseData(updated);
+                            updateStatus();
+                            addLog(QString("📉 CGM updated: %1 mmol/L").arg(updated, 0, 'f', 2));
+                        } else {
+                            cgmTimer->stop();
+                            cgmTimer->deleteLater();
+                            addLog("✅ CGM simulation complete.");
+                        }
+                    });
+                    cgmTimer->start(10000);
+                });
         dlg.exec();
     }
 
@@ -693,10 +663,43 @@ public slots:
     void onHistory() {
         std::cout << "[HomeScreenWidget] History button clicked.\n";
     }
+
+    // Modified onCharge: if charging is in progress and the button is pressed, stop charging.
     void onCharge() {
-        ChargingDisplayDialog dlg(m_battery, this);
-        dlg.exec();
-        updateStatus();
+        // Obtain the "Charge" button from the sender.
+        QPushButton* chargeButton = qobject_cast<QPushButton*>(sender());
+        if (!chargeButton)
+            return;
+
+        // If charging is already in progress, cancel it.
+        if (m_chargingTimer != nullptr) {
+            m_chargingTimer->stop();
+            m_chargingTimer->deleteLater();
+            m_chargingTimer = nullptr;
+            chargeButton->setStyleSheet("");
+            addLog("⏹️ Charging cancelled.");
+            return;
+        }
+
+        // Indicate charging by coloring the button green.
+        chargeButton->setStyleSheet("background-color: green; color: white;");
+        addLog("🔌 Charging started...");
+
+        // Start a timer to simulate real-time charging.
+        m_chargingTimer = new QTimer(this);
+        connect(m_chargingTimer, &QTimer::timeout, this, [=]() {
+            if (m_battery->getStatus() < 100) {
+                m_battery->charge();
+                updateStatus();
+            } else {
+                m_chargingTimer->stop();
+                m_chargingTimer->deleteLater();
+                m_chargingTimer = nullptr;
+                chargeButton->setStyleSheet("");
+                addLog("✅ Charging completed.");
+            }
+        });
+        m_chargingTimer->start(1000); // Update every 1 second.
     }
 
     void updateProfileDisplay() {
@@ -713,7 +716,6 @@ public slots:
         }
     }
 
-    // Public slot to add a log entry.
     void addLog(const QString& message) {
         m_logTextEdit->append(message);
     }
@@ -744,6 +746,7 @@ private:
     IOB* m_iob;
     CGMSensor* m_sensor;
     Profile* m_currentProfile = nullptr;
+    QTimer* m_chargingTimer;  // Added member variable to track the charging timer.
 };
 
 //--------------------------------------------------------
@@ -760,7 +763,7 @@ public:
         m_sensor = new CGMSensor();
         m_profileManager = new ProfileManager();
 
-        m_powerButton = new QPushButton("Power On", this);
+        m_powerButton = new QPushButton("POWER ON", this);
         m_powerButton->setCheckable(true);
         m_powerButton->setStyleSheet("background-color: lightblue; color: black; font-size: 16px; padding: 10px;");
 
