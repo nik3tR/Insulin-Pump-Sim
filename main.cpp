@@ -66,7 +66,7 @@ class Battery {
 public:
     int level;
     Battery() : level(75) {} // For testing -> starting at 75%
-    void discharge() { if(level > 0) level -= 10; }
+    void discharge() { if(level > 0) level -= 10; if (level < 0) level = 0;}
     int getStatus() const { return level; }
     void charge() { if(level < 100) level++; }
 };
@@ -514,16 +514,19 @@ public:
         QPushButton* optionsButton = new QPushButton("Options", this);
         QPushButton* historyButton = new QPushButton("History", this);
         QPushButton* chargeButton = new QPushButton("Charge", this);
+        QPushButton* basalButton = new QPushButton("Start Basal Delivery", this); //
         QHBoxLayout* navLayout = new QHBoxLayout();
         navLayout->addWidget(bolusButton);
         navLayout->addWidget(optionsButton);
         navLayout->addWidget(historyButton);
         navLayout->addWidget(chargeButton);
+        navLayout->addWidget(basalButton); //
 
         connect(bolusButton, &QPushButton::clicked, this, &HomeScreenWidget::onBolus);
         connect(optionsButton, &QPushButton::clicked, this, &HomeScreenWidget::onOptions);
         connect(historyButton, &QPushButton::clicked, this, &HomeScreenWidget::onHistory);
         connect(chargeButton, &QPushButton::clicked, this, &HomeScreenWidget::onCharge);
+        connect(basalButton, &QPushButton::clicked, this, &HomeScreenWidget::startBasalDelivery); //
 
         // Main Layout
         QVBoxLayout* mainLayout = new QVBoxLayout(this);
@@ -531,6 +534,14 @@ public:
         mainLayout->addLayout(profileAndLogLayout);
         mainLayout->addLayout(navLayout);
         setLayout(mainLayout);
+
+        // basal status label
+        basalStatusLabel = new QLabel("Basal Delivery not started.", this);
+        basalStatusLabel->setStyleSheet("background-color: lightgreen; padding: 4px;");
+        basalStatusLabel->setAlignment(Qt::AlignCenter);
+        basalStatusLabel->setFixedHeight(30);
+        layout()->addWidget(basalStatusLabel);
+
     }
 
 public slots:
@@ -632,7 +643,7 @@ public slots:
                             timer->stop();
                             timer->deleteLater();
                             delete tick;
-                            addLog("✅ Extended Bolus Completed");
+                            addLog("Extended Bolus Completed");
                         }
                     });
                     timer->start(10000);
@@ -680,13 +691,13 @@ public slots:
             m_chargingTimer->deleteLater();
             m_chargingTimer = nullptr;
             chargeButton->setStyleSheet("");
-            addLog("⏹️ Charging cancelled.");
+            addLog("Charging stopped.");
             return;
         }
 
         // Charge is ON
         chargeButton->setStyleSheet("background-color: green; color: white;");
-        addLog("🔌 Charging started...");
+        addLog("Charging started...");
 
         // Charging battery
         m_chargingTimer = new QTimer(this);
@@ -723,6 +734,95 @@ public slots:
         m_logTextEdit->append(message);
     }
 
+    void startBasalDelivery() {
+        if (!m_currentProfile) {
+            QMessageBox::warning(this, "Basal Delivery", "No profile loaded.");
+            return;
+        }
+
+        float rate = m_currentProfile->getBasalRate();
+        if (rate <= 0.0f) {
+            QMessageBox::warning(this, "Basal Delivery", "Set a valid basal rate in the profile to start delivery.");
+            return;
+        }
+
+        addLog(QString("Basal Delivery started at %1 u/hr").arg(rate));
+
+        // Flag to track if basal delivery is currently paused
+        bool isPaused = false;
+
+        // Timer to simulate hourly basal delivery every 10 seconds
+        QTimer* basalTimer = new QTimer(this);
+        connect(basalTimer, &QTimer::timeout, this, [=]() mutable {
+            float cgm = m_sensor->getGlucoseLevel();
+
+            if (isPaused) {
+                if (cgm >= 4.5f) {
+                    isPaused = false;
+                    basalStatusLabel->setText(QString("▶️ Resuming Basal @ %1 u/hr").arg(rate));
+
+                    addLog("CGM Safe — Resuming Basal Delivery");
+                } else {
+                    // Still paused, don't log again
+                    return;
+                }
+            } else {
+                if (cgm < 4.0f) {
+                    isPaused = true;
+                    basalStatusLabel->setText("Basal Paused (Low CGM)");
+
+                    addLog("⚠️ Basal Delivery Paused — CGM too low (< 3.9 mmol/L)");
+                    return;
+                }
+            }
+
+            // Deliver insulin
+            if (m_cartridge && m_cartridge->getInsulinLevel() > 0) {
+                int insulinLeft = m_cartridge->getInsulinLevel() - rate;
+                m_cartridge->updateInsulinLevel(insulinLeft > 0 ? insulinLeft : 0);
+            }
+
+            // Update IOB
+            if (m_iob)
+                m_iob->updateIOB(m_iob->getIOB() + rate);
+
+            // Discharge battery
+            if (m_battery)
+                m_battery->discharge();
+
+            // CGM drop simulation
+            if (m_sensor) {
+                float newCGM = m_sensor->getGlucoseLevel() - 0.1f;
+                if (newCGM < 2.5f) newCGM = 2.5f; // don't drop infinitely
+                m_sensor->updateGlucoseData(newCGM);
+            }
+
+            updateStatus();
+
+            addLog(QString("Basal Delivered: %1 u | CGM: %2 mmol/L | Battery: %3%")
+                       .arg(rate)
+                       .arg(m_sensor->getGlucoseLevel(), 0, 'f', 1)
+                       .arg(m_battery->getStatus()));
+
+            basalStatusLabel->setText(QString("Delivering Basal Insulin @ %1 u/hr").arg(rate));
+        });
+
+        basalTimer->start(10000); // every 10 seconds
+
+        /* Monitor CGM to resume insulin when CGM ≥ 4.5
+        QTimer* cgmMonitor = new QTimer(this);
+        connect(cgmMonitor, &QTimer::timeout, this, [=]() {
+            float cgm = m_sensor->getGlucoseLevel();
+            if (cgm >= 4.5f) {
+                basalStatus->setText(QString("▶️ Resuming Basal @ %1 u/hr").arg(rate));
+                addLog("CGM Safe — Resuming Basal Delivery");
+            }
+        });
+        cgmMonitor->start(10000); */
+    }
+
+
+
 private:
     QLabel* createStatusBox(const QString& title, const QString& value) {
         QLabel* box = new QLabel(title + "\n" + value, this);
@@ -750,6 +850,8 @@ private:
     CGMSensor* m_sensor;
     Profile* m_currentProfile = nullptr;
     QTimer* m_chargingTimer;
+    QLabel* basalStatusLabel = nullptr;
+
 };
 
 //--------------------------------------------------------
