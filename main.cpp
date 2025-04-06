@@ -25,7 +25,6 @@
 //--------------------------------------------------------
 // ENUMS
 //--------------------------------------------------------
-
 enum PumpState {
     Off,
     On,
@@ -65,8 +64,8 @@ public:
 class Battery {
 public:
     int level;
-    Battery() : level(75) {} // For testing -> starting at 75%
-    void discharge() { if(level > 0) level -= 10; if (level < 0) level = 0;}
+    Battery() : level(100) {} // For testing
+    void discharge() { if(level > 0) level -= 10; if (level < 0) level = 0; }
     int getStatus() const { return level; }
     void charge() { if(level < 100) level++; }
 };
@@ -344,7 +343,6 @@ public:
                 if (m_cartridge)
                     m_cartridge->updateInsulinLevel(m_cartridge->getInsulinLevel() - immediateDose);
 
-
                 emit extendedBolusParameters(duration, immediateDose, extendedDose, currentRate);
                 accept();
             }
@@ -384,8 +382,7 @@ private slots:
         double totalBolus = carbBolus + correctionBolus;
         double iob = (m_iob) ? m_iob->getIOB() : 0.0;
         m_finalBolus = totalBolus - iob;
-        if(m_finalBolus < 0) {m_finalBolus = 0;}
-
+        if(m_finalBolus < 0) { m_finalBolus = 0; }
 
         QString resultText;
         resultText += "--- BOLUS RESULT ---\n";
@@ -526,19 +523,19 @@ public:
         QPushButton* optionsButton = new QPushButton("Options", this);
         QPushButton* historyButton = new QPushButton("History", this);
         QPushButton* chargeButton = new QPushButton("Charge", this);
-        QPushButton* basalButton = new QPushButton("Start Basal Delivery", this); //
+        QPushButton* basalButton = new QPushButton("Start Basal Delivery", this);
         QHBoxLayout* navLayout = new QHBoxLayout();
         navLayout->addWidget(bolusButton);
         navLayout->addWidget(optionsButton);
         navLayout->addWidget(historyButton);
         navLayout->addWidget(chargeButton);
-        navLayout->addWidget(basalButton); //
+        navLayout->addWidget(basalButton);
 
         connect(bolusButton, &QPushButton::clicked, this, &HomeScreenWidget::onBolus);
         connect(optionsButton, &QPushButton::clicked, this, &HomeScreenWidget::onOptions);
         connect(historyButton, &QPushButton::clicked, this, &HomeScreenWidget::onHistory);
         connect(chargeButton, &QPushButton::clicked, this, &HomeScreenWidget::onCharge);
-        connect(basalButton, &QPushButton::clicked, this, &HomeScreenWidget::startBasalDelivery); //
+        connect(basalButton, &QPushButton::clicked, this, &HomeScreenWidget::startBasalDelivery);
 
         // Main Layout
         QVBoxLayout* mainLayout = new QVBoxLayout(this);
@@ -553,7 +550,6 @@ public:
         basalStatusLabel->setAlignment(Qt::AlignCenter);
         basalStatusLabel->setFixedHeight(30);
         layout()->addWidget(basalStatusLabel);
-
     }
 
 public slots:
@@ -620,10 +616,26 @@ public slots:
     void onBolus() {
         BolusCalculationDialog dlg(m_currentProfile, m_iob, m_cartridge, m_sensor, this);
 
-        // Connect the new signal to update the CGM sensor with user inputted bg
+        // Modified connection: when meal info is entered, not only update the CGM sensor
+        // but also start a timer that simulates a post-meal CGM rise.
         connect(&dlg, &BolusCalculationDialog::mealInfoEntered, this, [this](double newBG) {
             m_sensor->updateGlucoseData(newBG);
             updateStatus();
+            QTimer* mealRiseTimer = new QTimer(this);
+            connect(mealRiseTimer, &QTimer::timeout, this, [this, mealRiseTimer, newBG]() {
+                float currentBG = m_sensor->getGlucoseLevel();
+                float targetMealBG = newBG + 2.0f; // simulate an increase of 2 mmol/L post-meal
+                if (currentBG < targetMealBG) {
+                    m_sensor->updateGlucoseData(currentBG + 0.5f);
+                    updateStatus();
+                    addLog(QString("📈 Meal Eaten: CGM increased to %1 mmol/L").arg(m_sensor->getGlucoseLevel(), 0, 'f', 1));
+                } else {
+                    mealRiseTimer->stop();
+                    mealRiseTimer->deleteLater();
+                    addLog(" ✅ CGM rise finished.");
+                }
+            });
+            mealRiseTimer->start(5000); // increase every 5 seconds
         });
 
         // simulate extended delivery
@@ -671,59 +683,53 @@ public slots:
                                 updated = targetBG;
                             m_sensor->updateGlucoseData(updated);
                             updateStatus();
-                            addLog(QString("CGM updated: %1 mmol/L").arg(updated, 0, 'f', 2));
+                            addLog(QString("📈 CGM: %1 mmol/L").arg(updated, 0, 'f', 2));
                         } else {
                             cgmTimer->stop();
                             cgmTimer->deleteLater();
-                            addLog("CGM simulation complete.");
+                            addLog(" ✅ CGM @ Target: Complete");
                         }
                     });
                     cgmTimer->start(10000);
                 });
 
         // Connect the immediate bolus signal.
-               connect(&dlg, &BolusCalculationDialog::immediateBolusParameters, this, [this](double bolus) {
-                   // Check there's enough insulin.
-                   if (m_cartridge && m_cartridge->getInsulinLevel() < bolus) {
-                       QMessageBox::warning(this, "Insufficient Insulin",
-                                            "Not enough insulin in the cartridge for this bolus.");
-                       return;
-                   }
-                   // Update IOB.
-                   if (m_iob)
-                       m_iob->updateIOB(m_iob->getIOB() + bolus);
-                   // Reduce insulin level.
-                   if (m_cartridge) {
-                       int newLevel = m_cartridge->getInsulinLevel() - static_cast<int>(bolus);
-                       m_cartridge->updateInsulinLevel(newLevel > 0 ? newLevel : 0);
-                   }
-                   // Discharge battery.
-                   if (m_battery)
-                       m_battery->discharge();
-                   // Log the event and update status.
-                   addLog(QString("Immediate Bolus Delivered: %1 u").arg(bolus, 0, 'f', 1));
-                   updateStatus();
+        connect(&dlg, &BolusCalculationDialog::immediateBolusParameters, this, [this](double bolus) {
+            if (m_cartridge && m_cartridge->getInsulinLevel() < bolus) {
+                QMessageBox::warning(this, "Insufficient Insulin",
+                                     "Not enough insulin in the cartridge for this bolus.");
+                return;
+            }
+            if (m_iob)
+                m_iob->updateIOB(m_iob->getIOB() + bolus);
+            if (m_cartridge) {
+                int newLevel = m_cartridge->getInsulinLevel() - static_cast<int>(bolus);
+                m_cartridge->updateInsulinLevel(newLevel > 0 ? newLevel : 0);
+            }
+            if (m_battery)
+                m_battery->discharge();
+            addLog(QString("Immediate Bolus Delivered: %1 u").arg(bolus, 0, 'f', 1));
+            updateStatus();
 
-                   // CGM simulation: every 10 seconds, reduce CGM by 0.5 til BG target
-                   QTimer* cgmTimer = new QTimer(this);
-                   connect(cgmTimer, &QTimer::timeout, this, [=]() {
-                       double currentBG = m_sensor->getGlucoseLevel();
-                       double targetBG = (m_currentProfile) ? m_currentProfile->getTargetGlucose() : 5.0;
-                       if (currentBG > targetBG) {
-                           double updated = currentBG - 0.5;
-                           if (updated < targetBG)
-                               updated = targetBG;
-                           m_sensor->updateGlucoseData(updated);
-                           updateStatus();
-                           addLog(QString("CGM updated: %1 mmol/L").arg(updated, 0, 'f', 2));
-                       } else {
-                           cgmTimer->stop();
-                           cgmTimer->deleteLater();
-                           addLog("CGM simulation complete.");
-                       }
-                   });
-                   cgmTimer->start(10000);
-               });
+            QTimer* cgmTimer = new QTimer(this);
+            connect(cgmTimer, &QTimer::timeout, this, [=]() {
+                double currentBG = m_sensor->getGlucoseLevel();
+                double targetBG = (m_currentProfile) ? m_currentProfile->getTargetGlucose() : 5.0;
+                if (currentBG > targetBG) {
+                    double updated = currentBG - 0.5;
+                    if (updated < targetBG)
+                        updated = targetBG;
+                    m_sensor->updateGlucoseData(updated);
+                    updateStatus();
+                    addLog(QString("💉 CGM updated: %1 mmol/L").arg(updated, 0, 'f', 2));
+                } else {
+                    cgmTimer->stop();
+                    cgmTimer->deleteLater();
+                    addLog("CGM simulation complete.");
+                }
+            });
+            cgmTimer->start(10000);
+        });
 
         dlg.exec();
     }
@@ -735,14 +741,10 @@ public slots:
         std::cout << "[HomeScreenWidget] History button clicked.\n";
     }
 
-    // Modified onCharge: if charging is in progress and the button is pressed, stop charging.
     void onCharge() {
-        // Obtain the "Charge" button from the sender.
         QPushButton* chargeButton = qobject_cast<QPushButton*>(sender());
         if (!chargeButton)
             return;
-
-        // If charging is already in progress, cancel it.
         if (m_chargingTimer != nullptr) {
             m_chargingTimer->stop();
             m_chargingTimer->deleteLater();
@@ -751,12 +753,8 @@ public slots:
             addLog("Charging stopped.");
             return;
         }
-
-        // Charge is ON
         chargeButton->setStyleSheet("background-color: green; color: white;");
         addLog("Charging started...");
-
-        // Charging battery
         m_chargingTimer = new QTimer(this);
         connect(m_chargingTimer, &QTimer::timeout, this, [=]() {
             if (m_battery->getStatus() < 100) {
@@ -770,7 +768,7 @@ public slots:
                 addLog("✅ Charging completed.");
             }
         });
-        m_chargingTimer->start(1000); // Update every 1 second.
+        m_chargingTimer->start(1000);
     }
 
     void updateProfileDisplay() {
@@ -791,94 +789,84 @@ public slots:
         m_logTextEdit->append(message);
     }
 
+    // Modified: Basal Delivery now checks battery level and stops if battery is 0.
     void startBasalDelivery() {
         if (!m_currentProfile) {
             QMessageBox::warning(this, "Basal Delivery", "No profile loaded.");
             return;
         }
-
+        // Check battery level before starting basal delivery.
+        if (m_battery && m_battery->getStatus() == 0) {
+            QMessageBox::warning(this, "Basal Delivery", "Battery is depleted. Please charge the pump.");
+            return;
+        }
         float rate = m_currentProfile->getBasalRate();
         if (rate <= 0.0f) {
             QMessageBox::warning(this, "Basal Delivery", "Set a valid basal rate in the profile to start delivery.");
             return;
         }
-
         addLog(QString("Basal Delivery started at %1 u/hr").arg(rate));
-
-        // Flag to track if basal delivery is currently paused
         bool isPaused = false;
-
-        // Timer to simulate hourly basal delivery every 10 seconds
         QTimer* basalTimer = new QTimer(this);
         connect(basalTimer, &QTimer::timeout, this, [=]() mutable {
-            float cgm = m_sensor->getGlucoseLevel();
+            // Check battery level on each tick.
+            if (m_battery && m_battery->getStatus() == 0) {
+                addLog("🛑 Battery drained. Basal Delivery stopped.");
+                basalStatusLabel->setText("Basal Delivery Stopped (Battery 0%)");
+                basalTimer->stop();
+                basalTimer->deleteLater();
+                return;
+            }
 
+            if (m_battery->getStatus() <= 15 && m_battery->getStatus() > 0) {
+                int choice = QMessageBox::warning(this, "⚠️ Low Battery Warning",
+                                                  "Battery is low (15%). Charge Now!,
+                                                  QMessageBox::Yes | QMessageBox::No);
+                if (choice == QMessageBox::Yes) {
+                    onCharge();  // Invoke charging routine
+                    return;      // Pause further basal delivery until charging
+                }
+            }
+
+            float cgm = m_sensor->getGlucoseLevel();
             if (isPaused) {
                 if (cgm >= 4.5f) {
                     isPaused = false;
                     basalStatusLabel->setText(QString("▶️ Resuming Basal @ %1 u/hr").arg(rate));
-
                     addLog("CGM Safe — Resuming Basal Delivery");
                 } else {
-                    // Still paused, don't log again
                     return;
                 }
             } else {
                 if (cgm < 4.0f) {
                     isPaused = true;
                     basalStatusLabel->setText("Basal Paused (Low CGM)");
-
                     addLog("⚠️ Basal Delivery Paused — CGM too low (< 3.9 mmol/L)");
                     return;
                 }
             }
-
-            // Deliver insulin
             if (m_cartridge && m_cartridge->getInsulinLevel() > 0) {
                 int insulinLeft = m_cartridge->getInsulinLevel() - rate;
                 m_cartridge->updateInsulinLevel(insulinLeft > 0 ? insulinLeft : 0);
             }
-
-            // Update IOB
             if (m_iob)
                 m_iob->updateIOB(m_iob->getIOB() + rate);
-
-            // Discharge battery
             if (m_battery)
                 m_battery->discharge();
-
-            // CGM drop simulation
             if (m_sensor) {
                 float newCGM = m_sensor->getGlucoseLevel() - 0.1f;
-                if (newCGM < 2.5f) newCGM = 2.5f; // don't drop infinitely
+                if (newCGM < 2.5f) newCGM = 2.5f;
                 m_sensor->updateGlucoseData(newCGM);
             }
-
             updateStatus();
-
-            addLog(QString("Basal Delivered: %1 u | CGM: %2 mmol/L | Battery: %3%")
+            addLog(QString("Basal Delivered: %1 u | CGM: %2 mmol/L")
                        .arg(rate)
                        .arg(m_sensor->getGlucoseLevel(), 0, 'f', 1)
                        .arg(m_battery->getStatus()));
-
             basalStatusLabel->setText(QString("Delivering Basal Insulin @ %1 u/hr").arg(rate));
         });
-
-        basalTimer->start(10000); // every 10 seconds
-
-        /* Monitor CGM to resume insulin when CGM ≥ 4.5
-        QTimer* cgmMonitor = new QTimer(this);
-        connect(cgmMonitor, &QTimer::timeout, this, [=]() {
-            float cgm = m_sensor->getGlucoseLevel();
-            if (cgm >= 4.5f) {
-                basalStatus->setText(QString("▶️ Resuming Basal @ %1 u/hr").arg(rate));
-                addLog("CGM Safe — Resuming Basal Delivery");
-            }
-        });
-        cgmMonitor->start(10000); */
+        basalTimer->start(10000);
     }
-
-
 
 private:
     QLabel* createStatusBox(const QString& title, const QString& value) {
@@ -908,7 +896,6 @@ private:
     Profile* m_currentProfile = nullptr;
     QTimer* m_chargingTimer;
     QLabel* basalStatusLabel = nullptr;
-
 };
 
 //--------------------------------------------------------
@@ -961,7 +948,6 @@ private:
     IOB* m_iob;
     CGMSensor* m_sensor;
     ProfileManager* m_profileManager;
-
     QPushButton* m_powerButton;
     HomeScreenWidget* m_homeScreen;
 };
