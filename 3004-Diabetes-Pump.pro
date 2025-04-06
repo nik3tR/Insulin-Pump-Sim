@@ -1,4 +1,4 @@
-QT       += core gui
+QT       += core gui charts
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
@@ -12,7 +12,8 @@ QMAKE_EXTRA_MOCS += main.cpp
 
 SOURCES += \
     main.cpp \
-    # mainwindow.cpp
+ \    # mainwindow.cpp
+    mainwindow.cpp
 
 # HEADERS += \
 #     mainwindow.h
@@ -24,3 +25,9 @@ SOURCES += \
 # qnx: target.path = /tmp/$${TARGET}/bin
 # else: unix:!android: target.path = /opt/$${TARGET}/bin
 # !isEmpty(target.path): INSTALLS += target
+
+FORMS += \
+    mainwindow.ui
+
+HEADERS += \
+    mainwindow.h
