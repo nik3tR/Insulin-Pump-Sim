@@ -28,8 +28,6 @@
 #include <QtCharts/QLineSeries>
 #include <QtCharts/QSplineSeries>
 
-QT_CHARTS_USE_NAMESPACE
-
 //--------------------------------------------------------
 // ENUMS
 //--------------------------------------------------------
@@ -173,6 +171,206 @@ public:
 };
 
 //--------------------------------------------------------
+// MODULAR CLASSES FOR INSULIN DELIVERY
+//--------------------------------------------------------
+
+// ControlIQ Module: adjusts delivery based on CGM reading
+class ControlIQ {
+public:
+    ControlIQ() {}
+    double adjustDelivery(double cgm) {
+        // Simplistic adjustment: if BG is high, full rate; if low, reduce rate.
+        return (cgm >= 7.0 ? 1.0 : 0.5);
+    }
+};
+
+// BolusManager: computes bolus values based on meal info and profile
+class BolusManager {
+public:
+    BolusManager(Profile* profile, IOB* iob) : m_profile(profile), m_iob(iob) {}
+
+    double computeFinalBolus(double carbs, double currentBG) {
+        double carbRatio = 10.0, correctionFactor = 2.0, targetBG = 6.0;
+        if (m_profile) {
+            carbRatio = m_profile->getCarbRatio();
+            correctionFactor = m_profile->getCorrectionFactor();
+            targetBG = m_profile->getTargetGlucose();
+        }
+        double carbBolus = carbs / carbRatio;
+        double correctionBolus = (currentBG > targetBG) ? (currentBG - targetBG) / correctionFactor : 0.0;
+        double totalBolus = carbBolus + correctionBolus;
+        double iob = (m_iob) ? m_iob->getIOB() : 0.0;
+        double finalBolus = totalBolus - iob;
+        if(finalBolus < 0)
+            finalBolus = 0;
+        return finalBolus;
+    }
+
+    // Computes immediate and extended doses given a percentage for the immediate bolus
+    void computeExtendedBolus(double finalBolus, double immediatePercentage, double &immediateDose, double &extendedDose) {
+        immediateDose = finalBolus * immediatePercentage / 100.0;
+        extendedDose = finalBolus - immediateDose;
+    }
+
+private:
+    Profile* m_profile;
+    IOB* m_iob;
+};
+
+// BasalManager: handles the periodic delivery of basal insulin
+#include <functional>
+class BasalManager : public QObject {
+    Q_OBJECT
+public:
+    BasalManager(Profile* profile, Battery* battery, InsulinCartridge* cartridge, IOB* iob, CGMSensor* sensor, QObject* parent = nullptr)
+        : QObject(parent), m_profile(profile), m_battery(battery), m_cartridge(cartridge), m_iob(iob), m_sensor(sensor) {}
+
+    // The callbacks allow the UI to log events, update status, and change the basal status label.
+    void startBasalDelivery(std::function<void(const QString&)> logCallback,
+                            std::function<void()> updateStatusCallback,
+                            std::function<void(const QString&)> basalStatusCallback) {
+        if (!m_profile) {
+            logCallback("No profile loaded.");
+            return;
+        }
+        if (m_battery && m_battery->getStatus() == 0) {
+            logCallback("Battery is depleted. Please charge the pump.");
+            return;
+        }
+        float rate = m_profile->getBasalRate();
+        if (rate <= 0.0f) {
+            logCallback("Set a valid basal rate in the profile to start delivery.");
+            return;
+        }
+        logCallback(QString("Basal Delivery started at %1 u/hr").arg(rate));
+
+        m_timer = new QTimer(this);
+        ControlIQ controlIQ;
+        connect(m_timer, &QTimer::timeout, this, [=]() mutable {
+            if (m_battery && m_battery->getStatus() == 0) {
+                logCallback("🛑 Battery drained. Basal Delivery stopped.");
+                basalStatusCallback("Basal Delivery Stopped (Battery 0%)");
+                m_timer->stop();
+                m_timer->deleteLater();
+                return;
+            }
+            if (m_battery->getStatus() <= 15 && m_battery->getStatus() > 0) {
+                logCallback("⚠️ Low Battery Warning: Battery is low (15%).");
+            }
+            float cgm = m_sensor->getGlucoseLevel();
+            // Use ControlIQ to adjust the basal rate based on CGM reading
+            double adjustment = controlIQ.adjustDelivery(cgm);
+            float adjustedRate = rate * adjustment;
+
+            // Pause basal delivery if CGM is too low
+            if (cgm < 4.0f) {
+                basalStatusCallback("Basal Paused (Low CGM)");
+                logCallback("⚠️ Basal Delivery Paused — CGM too low (< 3.9 mmol/L)");
+                return;
+            }
+            // Deliver insulin
+            if (m_cartridge && m_cartridge->getInsulinLevel() > 0) {
+                int insulinLeft = m_cartridge->getInsulinLevel() - adjustedRate;
+                m_cartridge->updateInsulinLevel(insulinLeft > 0 ? insulinLeft : 0);
+            }
+            if (m_iob)
+                m_iob->updateIOB(m_iob->getIOB() + adjustedRate);
+            if (m_battery)
+                m_battery->discharge();
+            if (m_sensor) {
+                float newCGM = m_sensor->getGlucoseLevel() - 0.1f;
+                if (newCGM < 2.5f) newCGM = 2.5f;
+                m_sensor->updateGlucoseData(newCGM);
+            }
+            updateStatusCallback();
+            basalStatusCallback(QString("Delivering Basal Insulin @ %1 u/hr").arg(adjustedRate));
+            logCallback(QString("Basal Delivered: %1 u | CGM: %2 mmol/L")
+                            .arg(adjustedRate, 0, 'f', 1)
+                            .arg(m_sensor->getGlucoseLevel(), 0, 'f', 1));
+        });
+        m_timer->start(10000);
+    }
+
+    void stopBasalDelivery() {
+        if (m_timer) {
+            m_timer->stop();
+            m_timer->deleteLater();
+            m_timer = nullptr;
+        }
+    }
+
+private:
+    Profile* m_profile;
+    Battery* m_battery;
+    InsulinCartridge* m_cartridge;
+    IOB* m_iob;
+    CGMSensor* m_sensor;
+    QTimer* m_timer = nullptr;
+};
+
+//--------------------------------------------------------
+// PIN DIALOG (Security)
+//--------------------------------------------------------
+class PINDialog : public QDialog {
+    Q_OBJECT
+public:
+    PINDialog(QWidget* parent = nullptr) : QDialog(parent) {
+        setWindowTitle("Enter PIN");
+        QVBoxLayout* layout = new QVBoxLayout(this);
+        QLabel* label = new QLabel("Please enter your 4-digit PIN:", this);
+        layout->addWidget(label);
+        pinEdit = new QLineEdit(this);
+        pinEdit->setEchoMode(QLineEdit::Password);
+        layout->addWidget(pinEdit);
+        QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        layout->addWidget(buttonBox);
+        connect(buttonBox, &QDialogButtonBox::accepted, this, &PINDialog::verifyPIN);
+        connect(buttonBox, &QDialogButtonBox::rejected, this, &PINDialog::reject);
+    }
+    QString enteredPIN() const { return pinEdit->text(); }
+private slots:
+    void verifyPIN() {
+        // Hardcoded PIN for simulation
+        if(pinEdit->text() == "1234")
+            accept();
+        else {
+            QMessageBox::warning(this, "Invalid PIN", "The PIN you entered is incorrect.");
+            pinEdit->clear();
+        }
+    }
+private:
+    QLineEdit* pinEdit;
+};
+
+//--------------------------------------------------------
+// NAVIGATION MANAGER (Navigation)
+//--------------------------------------------------------
+// Modified: now accepts a pointer to a QStackedWidget to perform screen switching.
+class NavigationManager {
+public:
+    NavigationManager(QStackedWidget* stack) : m_stack(stack) {}
+    void navigateTo(const QString& screen) {
+        if (screen == "Home")
+            m_stack->setCurrentIndex(0);
+        else if (screen == "Options")
+            m_stack->setCurrentIndex(1);
+        else if (screen == "History")
+            m_stack->setCurrentIndex(2);
+        else if (screen == "Bolus") {
+            // Bolus remains as a dialog in this design.
+            std::cout << "[NavigationManager] Bolus view requested.\n";
+        }
+        std::cout << "[NavigationManager] Navigated to " << screen.toStdString() << "\n";
+    }
+    void navigateToOptions() { navigateTo("Options"); }
+    void navigateToHistory() { navigateTo("History"); }
+    void navigateToHome() { navigateTo("Home"); }
+    void navigateToBolus() { navigateTo("Bolus"); }
+private:
+    QStackedWidget* m_stack;
+};
+
+//--------------------------------------------------------
 // NEW / EDIT PROFILE DIALOG
 //--------------------------------------------------------
 class NewProfileDialog : public QDialog {
@@ -270,7 +468,7 @@ class BolusCalculationDialog : public QDialog {
 public:
     // Constructor receives profile, IOB, and cartridge pointers.
     BolusCalculationDialog(Profile* profile = nullptr, IOB* iob = nullptr, InsulinCartridge* cartridge = nullptr, CGMSensor* sensor = nullptr, QWidget* parent = nullptr)
-        : QDialog(parent), m_profile(profile), m_finalBolus(0.0), m_iob(iob), m_cartridge(cartridge), m_sensor(sensor)
+        : QDialog(parent), m_profile(profile), m_iob(iob), m_cartridge(cartridge), m_sensor(sensor), m_finalBolus(0.0)
     {
         setWindowTitle("Bolus Calculator");
         stackedWidget = new QStackedWidget(this);
@@ -327,7 +525,7 @@ public:
         connect(cancelButton2, &QPushButton::clicked, this, &QDialog::reject);
         connect(calculateButton, &QPushButton::clicked, this, &BolusCalculationDialog::calculateBolus);
 
-        // Immediately update IOB and insulin cartridge
+        // Immediately update IOB and insulin cartridge for immediate bolus
         connect(manualButton, &QPushButton::clicked, this, [this]() {
             std::cout << "[BolusCalculationDialog] Manual Bolus selected.\n";
             emit immediateBolusParameters(m_finalBolus);
@@ -340,12 +538,13 @@ public:
             if(extDlg.exec() == QDialog::Accepted) {
                 double duration = extDlg.getDuration();
                 double immediatePct = extDlg.getImmediatePercentage();
-                double extendedPct = extDlg.getExtendedPercentage();
-                double immediateDose = m_finalBolus * immediatePct / 100.0;
-                double extendedDose = m_finalBolus * extendedPct / 100.0;
+                double immediateDose, extendedDose;
+                // Use BolusManager to compute extended bolus parameters
+                BolusManager manager(m_profile, m_iob);
+                manager.computeExtendedBolus(m_finalBolus, immediatePct, immediateDose, extendedDose);
                 double currentRate = (duration > 0) ? extendedDose / duration : 0.0;
 
-                // update IOB
+                // update IOB and cartridge for immediate dose
                 if (m_iob)
                     m_iob->updateIOB(m_iob->getIOB() + immediateDose);
                 if (m_cartridge)
@@ -376,28 +575,32 @@ private slots:
             QMessageBox::warning(this, "Input Error", "Enter valid numbers for Carbs and BG.");
             return;
         }
-        //
         emit mealInfoEntered(currentBG);
 
-        double carbRatio = 10.0, correctionFactor = 2.0, targetBG = 6.0;
-        if(m_profile) {
-            carbRatio = m_profile->getCarbRatio();
-            correctionFactor = m_profile->getCorrectionFactor();
-            targetBG = m_profile->getTargetGlucose();
-        }
+        // Use BolusManager to compute the final bolus based on the inputs.
+        BolusManager manager(m_profile, m_iob);
+        m_finalBolus = manager.computeFinalBolus(carbs, currentBG);
+
+        QString resultText;
+        resultText += "--- BOLUS RESULT ---\n";
+        resultText += QString("Carbs: %1g | BG: %2 mmol/L | IOB: %3 u\n\n")
+                          .arg(carbs)
+                          .arg(currentBG)
+                          .arg((m_iob) ? m_iob->getIOB() : 0.0);
+        // For display, compute individual components as per the original formulas.
+        double carbRatio = (m_profile) ? m_profile->getCarbRatio() : 10.0;
+        double correctionFactor = (m_profile) ? m_profile->getCorrectionFactor() : 2.0;
+        double targetBG = (m_profile) ? m_profile->getTargetGlucose() : 6.0;
         double carbBolus = carbs / carbRatio;
         double correctionBolus = (currentBG > targetBG) ? (currentBG - targetBG) / correctionFactor : 0.0;
         double totalBolus = carbBolus + correctionBolus;
         double iob = (m_iob) ? m_iob->getIOB() : 0.0;
-        m_finalBolus = totalBolus - iob;
-        if(m_finalBolus < 0) { m_finalBolus = 0; }
 
-        QString resultText;
-        resultText += "--- BOLUS RESULT ---\n";
-        resultText += QString("Carbs: %1g | BG: %2 mmol/L | IOB: %3 u\n\n").arg(carbs).arg(currentBG).arg(iob);
         resultText += QString("Carb Bolus: %1 u\nCorrection Bolus: %2 u\nTotal: %3 u\n\nFinal: %4 u")
-                          .arg(carbBolus, 0, 'f', 1).arg(correctionBolus, 0, 'f', 1)
-                          .arg(totalBolus, 0, 'f', 1).arg(m_finalBolus, 0, 'f', 1);
+                          .arg(carbBolus, 0, 'f', 1)
+                          .arg(correctionBolus, 0, 'f', 1)
+                          .arg(totalBolus, 0, 'f', 1)
+                          .arg(m_finalBolus, 0, 'f', 1);
         resultLabel->setText(resultText);
         stackedWidget->setCurrentIndex(1);
     }
@@ -461,6 +664,7 @@ private:
 //--------------------------------------------------------
 // HOME SCREEN WIDGET
 //--------------------------------------------------------
+// Modified: Added a QStackedWidget (m_mainStackedWidget) to manage multiple views (Home, Options, History)
 class HomeScreenWidget : public QWidget {
     Q_OBJECT
 public:
@@ -477,8 +681,15 @@ public:
         m_iob(iob),
         m_sensor(sensor),
         m_currentProfile(nullptr),
-        m_chargingTimer(nullptr)   // Initialize charging timer to nullptr
+        m_chargingTimer(nullptr)
     {
+        // Create the main stacked widget for screen navigation.
+        m_mainStackedWidget = new QStackedWidget(this);
+
+        // --- Home Page ---
+        QWidget* homePage = new QWidget(this);
+        QVBoxLayout* homeLayout = new QVBoxLayout(homePage);
+
         // Pump Status Section
         QVBoxLayout* statusLayout = new QVBoxLayout();
 
@@ -537,15 +748,15 @@ public:
 
         statusLayout->addWidget(boxDataFrame);
 
-        QGroupBox* statusGroup = new QGroupBox("Pump Status", this);
+        QGroupBox* statusGroup = new QGroupBox("Pump Status", homePage);
         statusGroup->setLayout(statusLayout);
 
         // Personal Profiles Section
-        QGroupBox* profileGroup = new QGroupBox("Personal Profiles", this);
-        currentProfileLabel = new QLabel("No profile loaded.", this);
-        QPushButton* createProfileButton = new QPushButton("Create New Profile", this);
-        QPushButton* editProfileButton = new QPushButton("Edit Profile", this);
-        QPushButton* deleteProfileButton = new QPushButton("Delete Profile", this);
+        QGroupBox* profileGroup = new QGroupBox("Personal Profiles", homePage);
+        currentProfileLabel = new QLabel("No profile loaded.", homePage);
+        QPushButton* createProfileButton = new QPushButton("Create New Profile", homePage);
+        QPushButton* editProfileButton = new QPushButton("Edit Profile", homePage);
+        QPushButton* deleteProfileButton = new QPushButton("Delete Profile", homePage);
 
         QVBoxLayout* profileLayout = new QVBoxLayout();
         profileLayout->addWidget(currentProfileLabel);
@@ -555,8 +766,8 @@ public:
         profileGroup->setLayout(profileLayout);
 
         // Event Log Section
-        QGroupBox* logGroup = new QGroupBox("Event Log", this);
-        m_logTextEdit = new QTextEdit(this);
+        QGroupBox* logGroup = new QGroupBox("Event Log", homePage);
+        m_logTextEdit = new QTextEdit(homePage);
         m_logTextEdit->setReadOnly(true);
         QVBoxLayout* logLayout = new QVBoxLayout();
         logLayout->addWidget(m_logTextEdit);
@@ -567,16 +778,12 @@ public:
         profileAndLogLayout->addWidget(profileGroup);
         profileAndLogLayout->addWidget(logGroup);
 
-        connect(createProfileButton, &QPushButton::clicked, this, &HomeScreenWidget::onCreateProfile);
-        connect(editProfileButton, &QPushButton::clicked, this, &HomeScreenWidget::onEditProfile);
-        connect(deleteProfileButton, &QPushButton::clicked, this, &HomeScreenWidget::onDeleteProfile);
-
         // Navigation Buttons
-        QPushButton* bolusButton = new QPushButton("Bolus", this);
-        QPushButton* optionsButton = new QPushButton("Options", this);
-        QPushButton* historyButton = new QPushButton("History", this);
-        QPushButton* chargeButton = new QPushButton("Charge", this);
-        QPushButton* basalButton = new QPushButton("Start Basal Delivery", this);
+        QPushButton* bolusButton = new QPushButton("Bolus", homePage);
+        QPushButton* optionsButton = new QPushButton("Options", homePage);
+        QPushButton* historyButton = new QPushButton("History", homePage);
+        QPushButton* chargeButton = new QPushButton("Charge", homePage);
+        QPushButton* basalButton = new QPushButton("Start Basal Delivery", homePage);
         QHBoxLayout* navLayout = new QHBoxLayout();
         navLayout->addWidget(bolusButton);
         navLayout->addWidget(optionsButton);
@@ -584,25 +791,68 @@ public:
         navLayout->addWidget(chargeButton);
         navLayout->addWidget(basalButton);
 
-        connect(bolusButton, &QPushButton::clicked, this, &HomeScreenWidget::onBolus);
-        connect(optionsButton, &QPushButton::clicked, this, &HomeScreenWidget::onOptions);
-        connect(historyButton, &QPushButton::clicked, this, &HomeScreenWidget::onHistory);
-        connect(chargeButton, &QPushButton::clicked, this, &HomeScreenWidget::onCharge);
-        connect(basalButton, &QPushButton::clicked, this, &HomeScreenWidget::startBasalDelivery);
-
-        // Main Layout
-        QVBoxLayout* mainLayout = new QVBoxLayout(this);
-        mainLayout->addWidget(statusGroup);
-        mainLayout->addLayout(profileAndLogLayout);
-        mainLayout->addLayout(navLayout);
-        setLayout(mainLayout);
-
-        // basal status label
-        basalStatusLabel = new QLabel("Basal Delivery not started.", this);
+        // Assemble Home Page Layout
+        homeLayout->addWidget(statusGroup);
+        homeLayout->addLayout(profileAndLogLayout);
+        homeLayout->addLayout(navLayout);
+        basalStatusLabel = new QLabel("Basal Delivery not started.", homePage);
         basalStatusLabel->setStyleSheet("background-color: lightgreen; padding: 4px;");
         basalStatusLabel->setAlignment(Qt::AlignCenter);
         basalStatusLabel->setFixedHeight(30);
-        layout()->addWidget(basalStatusLabel);
+        homeLayout->addWidget(basalStatusLabel);
+
+        // --- Options Page ---
+        QWidget* optionsPage = new QWidget(this);
+        QVBoxLayout* optionsLayout = new QVBoxLayout(optionsPage);
+        QLabel* optionsLabel = new QLabel("Options Screen", optionsPage);
+        QPushButton* backFromOptions = new QPushButton("Back", optionsPage);
+        optionsLayout->addWidget(optionsLabel);
+        optionsLayout->addWidget(backFromOptions);
+
+        // --- History Page ---
+        QWidget* historyPage = new QWidget(this);
+        QVBoxLayout* historyLayout = new QVBoxLayout(historyPage);
+        QLabel* historyLabel = new QLabel("History Screen", historyPage);
+        QPushButton* backFromHistory = new QPushButton("Back", historyPage);
+        historyLayout->addWidget(historyLabel);
+        historyLayout->addWidget(backFromHistory);
+
+        // Add pages to the main stacked widget
+        m_mainStackedWidget->addWidget(homePage);     // index 0: Home
+        m_mainStackedWidget->addWidget(optionsPage);    // index 1: Options
+        m_mainStackedWidget->addWidget(historyPage);      // index 2: History
+
+        // Create a NavigationManager instance with the stacked widget.
+        m_navManager = new NavigationManager(m_mainStackedWidget);
+
+        // Connect navigation buttons
+        connect(bolusButton, &QPushButton::clicked, this, &HomeScreenWidget::onBolus);
+        connect(optionsButton, &QPushButton::clicked, this, [this]() {
+            m_navManager->navigateToOptions();
+        });
+        connect(historyButton, &QPushButton::clicked, this, [this]() {
+            m_navManager->navigateToHistory();
+        });
+        connect(chargeButton, &QPushButton::clicked, this, &HomeScreenWidget::onCharge);
+        connect(basalButton, &QPushButton::clicked, this, &HomeScreenWidget::startBasalDelivery);
+
+        // Back buttons for Options and History pages to return to Home.
+        connect(backFromOptions, &QPushButton::clicked, this, [this]() {
+            m_navManager->navigateToHome();
+        });
+        connect(backFromHistory, &QPushButton::clicked, this, [this]() {
+            m_navManager->navigateToHome();
+        });
+
+        // Set the main layout for the HomeScreenWidget.
+        QVBoxLayout* mainLayoutWidget = new QVBoxLayout(this);
+        mainLayoutWidget->addWidget(m_mainStackedWidget);
+        setLayout(mainLayoutWidget);
+
+        // Connections for profile management
+        connect(createProfileButton, &QPushButton::clicked, this, &HomeScreenWidget::onCreateProfile);
+        connect(editProfileButton, &QPushButton::clicked, this, &HomeScreenWidget::onEditProfile);
+        connect(deleteProfileButton, &QPushButton::clicked, this, &HomeScreenWidget::onDeleteProfile);
     }
 
 public slots:
@@ -669,10 +919,9 @@ public slots:
     }
 
     void onBolus() {
+        // For Bolus, we still use the dialog.
         BolusCalculationDialog dlg(m_currentProfile, m_iob, m_cartridge, m_sensor, this);
 
-        // Modified connection: when meal info is entered, not only update the CGM sensor
-        // but also start a timer that simulates a post-meal CGM rise.
         connect(&dlg, &BolusCalculationDialog::mealInfoEntered, this, [this](double newBG) {
             m_sensor->updateGlucoseData(newBG);
             updateStatus();
@@ -690,10 +939,9 @@ public slots:
                     addLog(" ✅ CGM rise finished.");
                 }
             });
-            mealRiseTimer->start(5000); // increase every 5 seconds
+            mealRiseTimer->start(5000);
         });
 
-        // simulate extended delivery
         connect(&dlg, &BolusCalculationDialog::extendedBolusParameters, this,
                 [this](double duration, double immediateDose, double extendedDose, double ratePerHour) {
                     int totalTicks = static_cast<int>(duration);
@@ -703,7 +951,6 @@ public slots:
                                .arg(totalTicks)
                                .arg(ratePerHour, 0, 'f', 2));
 
-                    //timer
                     QTimer* timer = new QTimer(this);
                     int* tick = new int(0);
                     connect(timer, &QTimer::timeout, this, [=]() mutable {
@@ -727,7 +974,6 @@ public slots:
                     });
                     timer->start(10000);
 
-                    // CGM simulation: every 10 seconds, reduce CGM by 0.5 til BG target
                     QTimer* cgmTimer = new QTimer(this);
                     connect(cgmTimer, &QTimer::timeout, this, [=]() {
                         double currentBG = m_sensor->getGlucoseLevel();
@@ -748,7 +994,6 @@ public slots:
                     cgmTimer->start(10000);
                 });
 
-        // Connect the immediate bolus signal.
         connect(&dlg, &BolusCalculationDialog::immediateBolusParameters, this, [this](double bolus) {
             if (m_cartridge && m_cartridge->getInsulinLevel() < bolus) {
                 QMessageBox::warning(this, "Insufficient Insulin",
@@ -789,13 +1034,6 @@ public slots:
         dlg.exec();
     }
 
-    void onOptions() {
-        std::cout << "[HomeScreenWidget] Options button clicked.\n";
-    }
-    void onHistory() {
-        std::cout << "[HomeScreenWidget] History button clicked.\n";
-    }
-
     void onCharge() {
         QPushButton* chargeButton = qobject_cast<QPushButton*>(sender());
         if (!chargeButton)
@@ -826,6 +1064,31 @@ public slots:
         m_chargingTimer->start(1000);
     }
 
+    // Use BasalManager for starting basal delivery.
+    void startBasalDelivery() {
+        if (!m_currentProfile) {
+            QMessageBox::warning(this, "Basal Delivery", "No profile loaded.");
+            return;
+        }
+        // Check battery level before starting basal delivery.
+        if (m_battery && m_battery->getStatus() == 0) {
+            QMessageBox::warning(this, "Basal Delivery", "Battery is depleted. Please charge the pump.");
+            return;
+        }
+        float rate = m_currentProfile->getBasalRate();
+        if (rate <= 0.0f) {
+            QMessageBox::warning(this, "Basal Delivery", "Set a valid basal rate in the profile to start delivery.");
+            return;
+        }
+        // Create a BasalManager instance and start delivery.
+        BasalManager* basalMgr = new BasalManager(m_currentProfile, m_battery, m_cartridge, m_iob, m_sensor, this);
+        basalMgr->startBasalDelivery(
+            [this](const QString &msg){ addLog(msg); },
+            [this](){ updateStatus(); },
+            [this](const QString &status){ basalStatusLabel->setText(status); }
+            );
+    }
+
     void updateProfileDisplay() {
         if(m_currentProfile) {
             currentProfileLabel->setText(
@@ -844,83 +1107,31 @@ public slots:
         m_logTextEdit->append(message);
     }
 
-    // Modified: Basal Delivery now checks battery level and stops if battery is 0.
-    void startBasalDelivery() {
-        if (!m_currentProfile) {
-            QMessageBox::warning(this, "Basal Delivery", "No profile loaded.");
-            return;
-        }
-        // Check battery level before starting basal delivery.
-        if (m_battery && m_battery->getStatus() == 0) {
-            QMessageBox::warning(this, "Basal Delivery", "Battery is depleted. Please charge the pump.");
-            return;
-        }
-        float rate = m_currentProfile->getBasalRate();
-        if (rate <= 0.0f) {
-            QMessageBox::warning(this, "Basal Delivery", "Set a valid basal rate in the profile to start delivery.");
-            return;
-        }
-        addLog(QString("Basal Delivery started at %1 u/hr").arg(rate));
-        bool isPaused = false;
-        QTimer* basalTimer = new QTimer(this);
-        connect(basalTimer, &QTimer::timeout, this, [=]() mutable {
-            // Check battery level on each tick.
-            if (m_battery && m_battery->getStatus() == 0) {
-                addLog("🛑 Battery drained. Basal Delivery stopped.");
-                basalStatusLabel->setText("Basal Delivery Stopped (Battery 0%)");
-                basalTimer->stop();
-                basalTimer->deleteLater();
-                return;
+    void updateGraph() {
+        for (int i = 0; i < m_graph_points->count(); i++) {
+            QPointF cur = m_graph_points->at(i);
+            if (cur.x() < -6) {
+                m_graph_points->remove(i);
+                continue;
             }
+            m_graph_points->replace(i, cur.x() - .5, cur.y());
+        }
+        m_graph_points->append(QPointF(0, m_sensor->getGlucoseLevel()));
 
-            if (m_battery->getStatus() <= 15 && m_battery->getStatus() > 0) {
-                int choice = QMessageBox::warning(this, "⚠️ Low Battery Warning",
-                                                  "Battery is low (15%). Charge Now!,
-                                                  QMessageBox::Yes | QMessageBox::No);
-                if (choice == QMessageBox::Yes) {
-                    onCharge();  // Invoke charging routine
-                    return;      // Pause further basal delivery until charging
-                }
-            }
+        m_predicted_points->clear();
+        if (m_graph_points->count() >= 3) {
+            QPointF p0 = m_graph_points->at(m_graph_points->count() - 1);
+            QPointF p1 = m_graph_points->at(m_graph_points->count() - 2);
+            QPointF p2 = m_graph_points->at(m_graph_points->count() - 3);
+            QPointF averageDiff = ((p1 - p0) + (p2 - p1)) * .5;
+            m_predicted_points->append(p0 - averageDiff);
+            m_predicted_points->append(p0 - 2 * averageDiff);
+            m_predicted_points->append(p0 - 3 * averageDiff);
+        }
 
-            float cgm = m_sensor->getGlucoseLevel();
-            if (isPaused) {
-                if (cgm >= 4.5f) {
-                    isPaused = false;
-                    basalStatusLabel->setText(QString("▶️ Resuming Basal @ %1 u/hr").arg(rate));
-                    addLog("CGM Safe — Resuming Basal Delivery");
-                } else {
-                    return;
-                }
-            } else {
-                if (cgm < 4.0f) {
-                    isPaused = true;
-                    basalStatusLabel->setText("Basal Paused (Low CGM)");
-                    addLog("⚠️ Basal Delivery Paused — CGM too low (< 3.9 mmol/L)");
-                    return;
-                }
-            }
-            if (m_cartridge && m_cartridge->getInsulinLevel() > 0) {
-                int insulinLeft = m_cartridge->getInsulinLevel() - rate;
-                m_cartridge->updateInsulinLevel(insulinLeft > 0 ? insulinLeft : 0);
-            }
-            if (m_iob)
-                m_iob->updateIOB(m_iob->getIOB() + rate);
-            if (m_battery)
-                m_battery->discharge();
-            if (m_sensor) {
-                float newCGM = m_sensor->getGlucoseLevel() - 0.1f;
-                if (newCGM < 2.5f) newCGM = 2.5f;
-                m_sensor->updateGlucoseData(newCGM);
-            }
-            updateStatus();
-            addLog(QString("Basal Delivered: %1 u | CGM: %2 mmol/L")
-                       .arg(rate)
-                       .arg(m_sensor->getGlucoseLevel(), 0, 'f', 1)
-                       .arg(m_battery->getStatus()));
-            basalStatusLabel->setText(QString("Delivering Basal Insulin @ %1 u/hr").arg(rate));
-        });
-        basalTimer->start(10000);
+        m_graph_line->clear();
+        m_graph_line->append(m_graph_points->points());
+        m_graph_line->append(m_predicted_points->points());
     }
 
 private:
@@ -940,34 +1151,6 @@ private:
         return box;
     }
 
-    void updateGraph() {
-        for (int i = 0; i < m_graph_points->count(); i++) {
-            QPointF cur = m_graph_points->at(i);
-            if (cur.x() < -6) {
-                m_graph_points->remove(i);
-                continue;
-            }
-            m_graph_points->replace(i, cur.x() - .5, cur.y());
-        }
-
-        m_graph_points->append(QPointF(0, m_sensor->getGlucoseLevel()));
-
-        m_predicted_points->clear();
-        if (m_graph_points->count() >= 3) {
-            QPointF p0 = m_graph_points->at(m_graph_points->count() - 1); // get the last 3 points
-            QPointF p1 = m_graph_points->at(m_graph_points->count() - 2);
-            QPointF p2 = m_graph_points->at(m_graph_points->count() - 3);
-            QPointF averageDiff = ((p1 - p0) + (p2 - p1)) * .5; // take the average slope between them
-            m_predicted_points->append(p0 - averageDiff); // estimate the next 3 points
-            m_predicted_points->append(p0 - 2 * averageDiff);
-            m_predicted_points->append(p0 - 3 * averageDiff);
-        }
-
-        m_graph_line->clear();
-        m_graph_line->append(m_graph_points->points());
-        m_graph_line->append(m_predicted_points->points());
-    }
-
     QLabel *batteryBox, *insulinBox, *iobBox, *cgmBox;
     QLabel *currentProfileLabel;
     QTextEdit* m_logTextEdit;
@@ -983,11 +1166,12 @@ private:
     QScatterSeries* m_predicted_points;
     QSplineSeries* m_graph_line;
     QLabel* basalStatusLabel = nullptr;
-
+    NavigationManager* m_navManager;
+    QStackedWidget* m_mainStackedWidget; // For view switching
 };
 
 //--------------------------------------------------------
-// MAIN SIMULATOR WIDGET: POWER ON/OFF TOGGLE
+// MAIN SIMULATOR WIDGET: POWER ON/OFF TOGGLE (with PIN-based lock)
 //--------------------------------------------------------
 class PumpSimulatorMainWidget : public QWidget {
     Q_OBJECT
@@ -1018,6 +1202,13 @@ public:
 public slots:
     void onPowerToggled(bool checked) {
         if (checked) {
+            // Require PIN entry before powering on
+            PINDialog pinDlg(this);
+            if(pinDlg.exec() != QDialog::Accepted) {
+                // If PIN entry fails, reset button and do not power on.
+                m_powerButton->setChecked(false);
+                return;
+            }
             m_pump->powerOn();
             m_powerButton->setText("Power Off");
             m_homeScreen->setVisible(true);
