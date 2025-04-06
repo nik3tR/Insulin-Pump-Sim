@@ -21,6 +21,14 @@
 #include <vector>
 #include <algorithm>
 #include <QObject>
+#include <QDebug>
+#include <QtCharts/QChartView>
+#include <QtCharts/QChart>
+#include <QtCharts/QScatterSeries>
+#include <QtCharts/QLineSeries>
+#include <QtCharts/QSplineSeries>
+
+QT_CHARTS_USE_NAMESPACE
 
 //--------------------------------------------------------
 // ENUMS
@@ -472,17 +480,62 @@ public:
         m_chargingTimer(nullptr)   // Initialize charging timer to nullptr
     {
         // Pump Status Section
-        QHBoxLayout* statusLayout = new QHBoxLayout();
+        QVBoxLayout* statusLayout = new QVBoxLayout();
+
+        // Graph Subsection
+        m_graph_points = new QScatterSeries();
+        m_graph_points->setMarkerSize(11);
+        m_graph_points->setMarkerShape(QScatterSeries::MarkerShapeCircle);
+        m_graph_points->setColor(Qt::black);
+
+        m_predicted_points = new QScatterSeries();
+        m_predicted_points->setMarkerSize(11);
+
+        m_graph_line = new QSplineSeries();
+        m_graph_line->setColor(Qt::blue);
+
+        QLineSeries* verticalLine = new QLineSeries();
+        verticalLine->append(0, 0);
+        verticalLine->append(0, 15);
+        verticalLine->setColor(Qt::green);
+
+        m_chart = new QChart();
+        m_chart->addSeries(m_graph_points);
+        m_chart->addSeries(m_predicted_points);
+        m_chart->addSeries(m_graph_line);
+        m_chart->addSeries(verticalLine);
+        m_chart->createDefaultAxes();
+        m_chart->setTitle("CGM readings");
+        m_chart->legend()->setVisible(false);
+
+        m_chart->axes()[0]->setRange(-6, 2);
+        m_chart->axes()[1]->setRange(2, 11);
+        m_chart->axes()[0]->setTitleText("Time (h)");
+        m_chart->axes()[1]->setTitleText("Glucose Level (mmol/L)");
+
+        QChartView* chartView = new QChartView(m_chart);
+        chartView->setRenderHint(QPainter::Antialiasing);
+        chartView->setMinimumSize(QSize(500, 350));
+        m_predicted_points->setColor(Qt::gray);
+
+        statusLayout->addWidget(chartView);
+
+        QHBoxLayout* boxDataLayout = new QHBoxLayout();
 
         batteryBox = createStatusBox("Battery", QString::number(m_battery->getStatus()));
         insulinBox = createStatusBox("Insulin", QString::number(m_cartridge->getInsulinLevel()));
         iobBox     = createStatusBox("IOB", QString::number(m_iob->getIOB()));
         cgmBox     = createStatusBox("CGM", QString::number(m_sensor->getGlucoseLevel()) + " mmol/L");
 
-        statusLayout->addWidget(batteryBox);
-        statusLayout->addWidget(insulinBox);
-        statusLayout->addWidget(iobBox);
-        statusLayout->addWidget(cgmBox);
+        boxDataLayout->addWidget(batteryBox);
+        boxDataLayout->addWidget(insulinBox);
+        boxDataLayout->addWidget(iobBox);
+        boxDataLayout->addWidget(cgmBox);
+
+        QFrame* boxDataFrame = new QFrame();
+        boxDataFrame->setLayout(boxDataLayout);
+
+        statusLayout->addWidget(boxDataFrame);
 
         QGroupBox* statusGroup = new QGroupBox("Pump Status", this);
         statusGroup->setLayout(statusLayout);
@@ -558,6 +611,8 @@ public slots:
         insulinBox->setText("Insulin\n" + QString::number(m_cartridge->getInsulinLevel()));
         iobBox->setText("IOB\n" + QString::number(m_iob->getIOB()));
         cgmBox->setText("CGM\n" + QString::number(m_sensor->getGlucoseLevel()) + " mmol/L");
+
+        updateGraph();
     }
 
     void onCreateProfile() {
@@ -885,6 +940,34 @@ private:
         return box;
     }
 
+    void updateGraph() {
+        for (int i = 0; i < m_graph_points->count(); i++) {
+            QPointF cur = m_graph_points->at(i);
+            if (cur.x() < -6) {
+                m_graph_points->remove(i);
+                continue;
+            }
+            m_graph_points->replace(i, cur.x() - .5, cur.y());
+        }
+
+        m_graph_points->append(QPointF(0, m_sensor->getGlucoseLevel()));
+
+        m_predicted_points->clear();
+        if (m_graph_points->count() >= 3) {
+            QPointF p0 = m_graph_points->at(m_graph_points->count() - 1); // get the last 3 points
+            QPointF p1 = m_graph_points->at(m_graph_points->count() - 2);
+            QPointF p2 = m_graph_points->at(m_graph_points->count() - 3);
+            QPointF averageDiff = ((p1 - p0) + (p2 - p1)) * .5; // take the average slope between them
+            m_predicted_points->append(p0 - averageDiff); // estimate the next 3 points
+            m_predicted_points->append(p0 - 2 * averageDiff);
+            m_predicted_points->append(p0 - 3 * averageDiff);
+        }
+
+        m_graph_line->clear();
+        m_graph_line->append(m_graph_points->points());
+        m_graph_line->append(m_predicted_points->points());
+    }
+
     QLabel *batteryBox, *insulinBox, *iobBox, *cgmBox;
     QLabel *currentProfileLabel;
     QTextEdit* m_logTextEdit;
@@ -895,7 +978,12 @@ private:
     CGMSensor* m_sensor;
     Profile* m_currentProfile = nullptr;
     QTimer* m_chargingTimer;
+    QChart* m_chart;
+    QScatterSeries* m_graph_points;
+    QScatterSeries* m_predicted_points;
+    QSplineSeries* m_graph_line;
     QLabel* basalStatusLabel = nullptr;
+
 };
 
 //--------------------------------------------------------
