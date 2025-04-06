@@ -262,8 +262,8 @@ class BolusCalculationDialog : public QDialog {
     Q_OBJECT
 public:
     // Constructor receives profile, IOB, and cartridge pointers.
-    BolusCalculationDialog(Profile* profile = nullptr, IOB* iob = nullptr, InsulinCartridge* cartridge = nullptr, QWidget* parent = nullptr)
-        : QDialog(parent), m_profile(profile), m_finalBolus(0.0), m_iob(iob), m_cartridge(cartridge)
+    BolusCalculationDialog(Profile* profile = nullptr, IOB* iob = nullptr, InsulinCartridge* cartridge = nullptr, CGMSensor* sensor = nullptr, QWidget* parent = nullptr)
+        : QDialog(parent), m_profile(profile), m_finalBolus(0.0), m_iob(iob), m_cartridge(cartridge), m_sensor(sensor)
     {
         setWindowTitle("Bolus Calculator");
         stackedWidget = new QStackedWidget(this);
@@ -276,6 +276,11 @@ public:
         QFormLayout* formLayout = new QFormLayout();
         carbsEdit = new QLineEdit(inputPage);
         bgEdit = new QLineEdit(inputPage);
+
+        // auto-populate blood glucose
+
+        if(m_sensor) bgEdit->setText(QString::number(m_sensor->getGlucoseLevel()));
+
         formLayout->addRow("Carbohydrates (g):", carbsEdit);
         formLayout->addRow("Current BG (mmol/L):", bgEdit);
         inputLayout->addLayout(formLayout);
@@ -315,6 +320,8 @@ public:
         connect(cancelButton1, &QPushButton::clicked, this, &QDialog::reject);
         connect(cancelButton2, &QPushButton::clicked, this, &QDialog::reject);
         connect(calculateButton, &QPushButton::clicked, this, &BolusCalculationDialog::calculateBolus);
+
+        // Immediately update IOB and insulin cartridge
         connect(manualButton, &QPushButton::clicked, this, [this]() {
             std::cout << "[BolusCalculationDialog] Manual Bolus selected.\n";
             accept();
@@ -395,6 +402,7 @@ private:
     double m_finalBolus;
     IOB* m_iob;
     InsulinCartridge* m_cartridge;
+    CGMSensor* m_sensor;
 };
 
 //--------------------------------------------------------
@@ -606,7 +614,7 @@ public slots:
     }
 
     void onBolus() {
-        BolusCalculationDialog dlg(m_currentProfile, m_iob, m_cartridge, this);
+        BolusCalculationDialog dlg(m_currentProfile, m_iob, m_cartridge, m_sensor, this);
 
         // Connect the new signal to update the CGM sensor with user inputted bg
         connect(&dlg, &BolusCalculationDialog::mealInfoEntered, this, [this](double newBG) {
@@ -614,7 +622,7 @@ public slots:
             updateStatus();
         });
 
-        // simulate extended dleivery
+        // simulate extended delivery
         connect(&dlg, &BolusCalculationDialog::extendedBolusParameters, this,
                 [this](double duration, double immediateDose, double extendedDose, double ratePerHour) {
                     int totalTicks = static_cast<int>(duration);
