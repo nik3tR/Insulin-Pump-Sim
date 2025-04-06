@@ -278,7 +278,6 @@ public:
         bgEdit = new QLineEdit(inputPage);
 
         // auto-populate blood glucose
-
         if(m_sensor) bgEdit->setText(QString::number(m_sensor->getGlucoseLevel()));
 
         formLayout->addRow("Carbohydrates (g):", carbsEdit);
@@ -324,6 +323,7 @@ public:
         // Immediately update IOB and insulin cartridge
         connect(manualButton, &QPushButton::clicked, this, [this]() {
             std::cout << "[BolusCalculationDialog] Manual Bolus selected.\n";
+            emit immediateBolusParameters(m_finalBolus);
             accept();
         });
 
@@ -356,6 +356,8 @@ public:
 signals:
     // signal the extended bolus
     void extendedBolusParameters(double duration, double immediateDose, double extendedDose, double ratePerHour);
+    // signal immediate bolus
+    void immediateBolusParameters(double immediateDose);
     // pass the user-entered Current BG update CGM sensor
     void mealInfoEntered(double currentBG);
 
@@ -382,6 +384,8 @@ private slots:
         double totalBolus = carbBolus + correctionBolus;
         double iob = (m_iob) ? m_iob->getIOB() : 0.0;
         m_finalBolus = totalBolus - iob;
+        if(m_finalBolus < 0) {m_finalBolus = 0;}
+
 
         QString resultText;
         resultText += "--- BOLUS RESULT ---\n";
@@ -667,15 +671,60 @@ public slots:
                                 updated = targetBG;
                             m_sensor->updateGlucoseData(updated);
                             updateStatus();
-                            addLog(QString("📉 CGM updated: %1 mmol/L").arg(updated, 0, 'f', 2));
+                            addLog(QString("CGM updated: %1 mmol/L").arg(updated, 0, 'f', 2));
                         } else {
                             cgmTimer->stop();
                             cgmTimer->deleteLater();
-                            addLog("✅ CGM simulation complete.");
+                            addLog("CGM simulation complete.");
                         }
                     });
                     cgmTimer->start(10000);
                 });
+
+        // Connect the immediate bolus signal.
+               connect(&dlg, &BolusCalculationDialog::immediateBolusParameters, this, [this](double bolus) {
+                   // Check there's enough insulin.
+                   if (m_cartridge && m_cartridge->getInsulinLevel() < bolus) {
+                       QMessageBox::warning(this, "Insufficient Insulin",
+                                            "Not enough insulin in the cartridge for this bolus.");
+                       return;
+                   }
+                   // Update IOB.
+                   if (m_iob)
+                       m_iob->updateIOB(m_iob->getIOB() + bolus);
+                   // Reduce insulin level.
+                   if (m_cartridge) {
+                       int newLevel = m_cartridge->getInsulinLevel() - static_cast<int>(bolus);
+                       m_cartridge->updateInsulinLevel(newLevel > 0 ? newLevel : 0);
+                   }
+                   // Discharge battery.
+                   if (m_battery)
+                       m_battery->discharge();
+                   // Log the event and update status.
+                   addLog(QString("Immediate Bolus Delivered: %1 u").arg(bolus, 0, 'f', 1));
+                   updateStatus();
+
+                   // CGM simulation: every 10 seconds, reduce CGM by 0.5 til BG target
+                   QTimer* cgmTimer = new QTimer(this);
+                   connect(cgmTimer, &QTimer::timeout, this, [=]() {
+                       double currentBG = m_sensor->getGlucoseLevel();
+                       double targetBG = (m_currentProfile) ? m_currentProfile->getTargetGlucose() : 5.0;
+                       if (currentBG > targetBG) {
+                           double updated = currentBG - 0.5;
+                           if (updated < targetBG)
+                               updated = targetBG;
+                           m_sensor->updateGlucoseData(updated);
+                           updateStatus();
+                           addLog(QString("CGM updated: %1 mmol/L").arg(updated, 0, 'f', 2));
+                       } else {
+                           cgmTimer->stop();
+                           cgmTimer->deleteLater();
+                           addLog("CGM simulation complete.");
+                       }
+                   });
+                   cgmTimer->start(10000);
+               });
+
         dlg.exec();
     }
 
