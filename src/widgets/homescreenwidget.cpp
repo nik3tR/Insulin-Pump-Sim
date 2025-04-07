@@ -30,9 +30,8 @@
 #include <QFrame>
 #include <QPainter>
 #include <QDateTime>
-#include <iostream>
 
-QT_CHARTS_USE_NAMESPACE
+// QT_CHARTS_USE_NAMESPACE
 
 // --- Constructor ---
 HomeScreenWidget::HomeScreenWidget(ProfileManager* profileManager,

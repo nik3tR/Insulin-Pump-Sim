@@ -1,10 +1,7 @@
-#include "boluscalculationdialog.h"
-#include "extendedbolusdialog.h"
+#include "src/dialogs/boluscalculationdialog.h"
 #include "src/logic/bolusmanager.h"
-#include "src/models/iob.h"
-#include "src/models/insulincartridge.h"
-#include "src/models/cgmsensor.h"
-#include "src/models/profile.h"
+#include "extendedbolusdialog.h"
+
 #include <QVBoxLayout>
 #include <QFormLayout>
 #include <QDialogButtonBox>
@@ -12,8 +9,18 @@
 #include <iostream>
 
 // Dialog for computing bolus based on carbs/BG, extended bolus, and result preview
-BolusCalculationDialog::BolusCalculationDialog(Profile* profile, IOB* iob, InsulinCartridge* cartridge, CGMSensor* sensor, QWidget* parent)
-    : QDialog(parent), m_profile(profile), m_finalBolus(0.0), m_iob(iob), m_cartridge(cartridge), m_sensor(sensor)
+BolusCalculationDialog::BolusCalculationDialog(Profile* profile,
+                                               IOB* iob,
+                                               InsulinCartridge* cartridge,
+                                               CGMSensor* sensor,
+                                               QWidget* parent)
+    : QDialog(parent),
+    m_profile(profile),
+    m_finalBolus(0.0),
+    m_iob(iob),
+    m_cartridge(cartridge),
+    m_sensor(sensor),
+    m_manager(profile, iob)
 {
     setWindowTitle("Bolus Calculator");
     stackedWidget = new QStackedWidget(this);
@@ -26,7 +33,7 @@ BolusCalculationDialog::BolusCalculationDialog(Profile* profile, IOB* iob, Insul
 
     QFormLayout* formLayout = new QFormLayout();
     carbsEdit = new QLineEdit(inputPage);
-    bgEdit = new QLineEdit(inputPage);
+    bgEdit    = new QLineEdit(inputPage);
     if (m_sensor) bgEdit->setText(QString::number(m_sensor->getGlucoseLevel()));
     formLayout->addRow("Carbohydrates (g):", carbsEdit);
     formLayout->addRow("Current BG (mmol/L):", bgEdit);
@@ -34,7 +41,7 @@ BolusCalculationDialog::BolusCalculationDialog(Profile* profile, IOB* iob, Insul
 
     QHBoxLayout* inputButtonLayout = new QHBoxLayout();
     QPushButton* calculateButton = new QPushButton("Calculate Bolus", inputPage);
-    QPushButton* cancelButton1 = new QPushButton("Cancel", inputPage);
+    QPushButton* cancelButton1  = new QPushButton("Cancel", inputPage);
     inputButtonLayout->addWidget(calculateButton);
     inputButtonLayout->addWidget(cancelButton1);
     inputLayout->addLayout(inputButtonLayout);
@@ -53,7 +60,7 @@ BolusCalculationDialog::BolusCalculationDialog(Profile* profile, IOB* iob, Insul
     resultLayout->addWidget(formulaLabel);
 
     QHBoxLayout* resultButtonLayout = new QHBoxLayout();
-    manualButton = new QPushButton("Immediate Bolus", resultPage);
+    manualButton   = new QPushButton("Immediate Bolus", resultPage);
     extendedButton = new QPushButton("Extended Bolus", resultPage);
     QPushButton* cancelButton2 = new QPushButton("Cancel", resultPage);
     resultButtonLayout->addWidget(manualButton);
@@ -79,12 +86,15 @@ BolusCalculationDialog::BolusCalculationDialog(Profile* profile, IOB* iob, Insul
     connect(extendedButton, &QPushButton::clicked, this, [this]() {
         ExtendedBolusDialog extDlg(this);
         if (extDlg.exec() == QDialog::Accepted) {
-            double duration = extDlg.getDuration();
-            double immediatePct = extDlg.getImmediatePercentage();
-            double immediateDose, extendedDose;
-            BolusManager manager(m_profile, m_iob);
-            manager.computeExtendedBolus(m_finalBolus, immediatePct, immediateDose, extendedDose);
-            double currentRate = (duration > 0) ? extendedDose / duration : 0.0;
+            double duration      = extDlg.getDuration();
+            double immediatePct  = extDlg.getImmediatePercentage();
+            double extendedPct   = extDlg.getExtendedPercentage();
+
+            // Calculate via BolusManager
+            auto params = m_manager.calculateExtended(m_finalBolus, immediatePct, extendedPct, duration);
+            double immediateDose = params.immediateDose;
+            double extendedDose  = params.extendedDose;
+            double currentRate   = params.ratePerHour;
 
             if (m_iob)
                 m_iob->updateIOB(m_iob->getIOB() + immediateDose);
@@ -97,14 +107,10 @@ BolusCalculationDialog::BolusCalculationDialog(Profile* profile, IOB* iob, Insul
     });
 }
 
-QLineEdit* BolusCalculationDialog::getCarbsEdit() {
-    return carbsEdit;
-}
-
 // Perform bolus calculation and show result page
 void BolusCalculationDialog::calculateBolus() {
     bool ok1, ok2;
-    double carbs = carbsEdit->text().toDouble(&ok1);
+    double carbs    = carbsEdit->text().toDouble(&ok1);
     double currentBG = bgEdit->text().toDouble(&ok2);
     if (!ok1 || !ok2) {
         QMessageBox::warning(this, "Input Error", "Enter valid numbers for Carbs and BG.");
@@ -112,28 +118,22 @@ void BolusCalculationDialog::calculateBolus() {
     }
 
     emit mealInfoEntered(currentBG);
-    BolusManager manager(m_profile, m_iob);
-    m_finalBolus = manager.computeFinalBolus(carbs, currentBG);
+
+    // Compute via BolusManager
+    BolusResult res = m_manager.calculateStandard(carbs, currentBG);
+    m_finalBolus    = res.finalBolus;
 
     QString resultText;
     resultText += "--- BOLUS RESULT ---\n";
     resultText += QString("Carbs: %1g | BG: %2 mmol/L | IOB: %3 u\n\n")
                       .arg(carbs)
                       .arg(currentBG)
-                      .arg((m_iob) ? m_iob->getIOB() : 0.0);
-
-    double carbRatio = (m_profile) ? m_profile->getCarbRatio() : 10.0;
-    double correctionFactor = (m_profile) ? m_profile->getCorrectionFactor() : 2.0;
-    double targetBG = (m_profile) ? m_profile->getTargetGlucose() : 6.0;
-    double carbBolus = carbs / carbRatio;
-    double correctionBolus = (currentBG > targetBG) ? (currentBG - targetBG) / correctionFactor : 0.0;
-    double totalBolus = carbBolus + correctionBolus;
-
+                      .arg(res.existingIOB);
     resultText += QString("Carb Bolus: %1 u\nCorrection Bolus: %2 u\nTotal: %3 u\n\nFinal: %4 u")
-                      .arg(carbBolus, 0, 'f', 1)
-                      .arg(correctionBolus, 0, 'f', 1)
-                      .arg(totalBolus, 0, 'f', 1)
-                      .arg(m_finalBolus, 0, 'f', 1);
+                      .arg(res.carbBolus,       0, 'f', 1)
+                      .arg(res.correctionBolus, 0, 'f', 1)
+                      .arg(res.totalBolus,      0, 'f', 1)
+                      .arg(res.finalBolus,      0, 'f', 1);
 
     resultLabel->setText(resultText);
     stackedWidget->setCurrentIndex(1);
