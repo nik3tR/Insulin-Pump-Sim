@@ -49,6 +49,9 @@ public:
     PumpState state;
     Profile* currentProfile;
     InsulinPump() : state(Off), currentProfile(nullptr) {}
+
+
+    // Power on/off the pump (Use Case 1)
     void powerOn() {
         state = On;
     }
@@ -270,6 +273,8 @@ public:
         : QObject(parent), m_profile(profile), m_battery(battery), m_cartridge(cartridge), m_iob(iob), m_sensor(sensor) {}
 
     // callbacks allow the UI to log events, update status, and change the basal status label.
+
+    // (Use Case 6 and Use Case 10: ControlIQ adjustments)
     void startBasalDelivery(std::function<void(const QString&)> logCallback,
                             std::function<void()> updateStatusCallback,
                             std::function<void(const QString&)> basalStatusCallback) {
@@ -291,6 +296,8 @@ public:
         m_timer = new QTimer(this);
         ControlIQ controlIQ;
         connect(m_timer, &QTimer::timeout, this, [=]() mutable {
+
+            // Battery check (Use Case 12: Charging/low battery handling)
             if (m_battery && m_battery->getStatus() == 0) {
                 logCallback("Battery fully drained ->  Basal Delivery stopped.");
                 basalStatusCallback("Basal Delivery Stopped (Battery 0%)");
@@ -307,7 +314,7 @@ public:
 
 
 
-            // Check for CGM disconnection and occlusion alerts
+            // Check for CGM disconnection and occlusion alerts [ cartridge status]
             if(m_sensor && !m_sensor->isConnected()) {
                 logCallback("[SYSTEM EVENT] CGM sensor disconnected. Basal delivery suspended.");
                 basalStatusCallback("Basal Delivery Suspended (CGM Disconnected)");
@@ -333,7 +340,9 @@ public:
                 logCallback("[BASAL EVENT] Basal Delivery Paused — CGM too low (< 3.9 mmol/L)");
                 return;
             }
-            // Deliver insulin
+
+
+            // Deliver insulin and update IOB
             if (m_cartridge && m_cartridge->getInsulinLevel() > 0) {
                 int insulinLeft = m_cartridge->getInsulinLevel() - adjustedRate;
                 m_cartridge->updateInsulinLevel(insulinLeft > 0 ? insulinLeft : 0);
@@ -341,6 +350,8 @@ public:
             if (m_iob)
                 m_iob->updateIOB(m_iob->getIOB() + adjustedRate);
             if (m_battery)
+
+                // Drain the battery a little
                 m_battery->discharge();
             if (m_sensor) {
                 float newCGM = m_sensor->getGlucoseLevel() - 0.1f;
@@ -399,6 +410,8 @@ private:
 class SetPinDialog : public QDialog {
     Q_OBJECT
 public:
+
+    //MAKE THEM enter PIN with popup
     SetPinDialog(QWidget* parent = nullptr) : QDialog(parent) {
         setWindowTitle("Set 4-Digit PIN");
         QFormLayout* layout = new QFormLayout(this);
@@ -412,9 +425,12 @@ public:
     }
     QString getPin() const { return pinEdit->text(); }
 private slots:
+
+
+    //Check if pin is 4 digit
     void verifyPin() {
         if(pinEdit->text().length() != 4) {
-            QMessageBox::warning(this, "Invalid PIN", "PIN must be 4 digits.");
+            QMessageBox::warning(this, "Invalid PIN", "PIN 4 digits only.");
             return;
         }
         accept();
@@ -424,11 +440,13 @@ private:
 };
 
 //--------------------------------------------------------
-// PIN DIALOG (Modified)
+// PIN DIALOG
 //--------------------------------------------------------
 class PINDialog : public QDialog {
     Q_OBJECT
 public:
+
+    //for new pin, make them enter a new pin if program STARTED
     PINDialog(const QString& expectedPin, QWidget* parent = nullptr) : QDialog(parent), m_expectedPin(expectedPin) {
         setWindowTitle("Enter PIN");
         QVBoxLayout* layout = new QVBoxLayout(this);
@@ -443,12 +461,16 @@ public:
         connect(buttonBox, &QDialogButtonBox::rejected, this, &PINDialog::reject);
     }
     QString enteredPIN() const { return pinEdit->text(); }
+
+
 private slots:
+
+    //Check if pin is correct
     void verifyPIN() {
         if(pinEdit->text() == m_expectedPin)
             accept();
         else {
-            QMessageBox::warning(this, "Invalid PIN", "The PIN you entered is incorrect.");
+            QMessageBox::warning(this, "Wrong PIN", "The PIN is not correct.");
             pinEdit->clear();
         }
     }
@@ -462,6 +484,8 @@ private:
 //--------------------------------------------------------
 class NavigationManager {
 public:
+
+    //switching screen to a different display
     NavigationManager(QStackedWidget* stack) : m_stack(stack) {}
     void navigateTo(const QString& screen) {
         if (screen == "Home")
@@ -470,15 +494,15 @@ public:
             m_stack->setCurrentIndex(1);
         else if (screen == "History")
             m_stack->setCurrentIndex(2);
-        else if (screen == "Bolus") {
-            std::cout << "[NavigationManager] Bolus view requested.\n";
-        }
+
         std::cout << "[NavigationManager] Navigated to " << screen.toStdString() << "\n";
     }
     void navigateToOptions() { navigateTo("Options"); }
     void navigateToHistory() { navigateTo("History"); }
     void navigateToHome() { navigateTo("Home"); }
     void navigateToBolus() { navigateTo("Bolus"); }
+
+
 private:
     QStackedWidget* m_stack;
 };
@@ -489,9 +513,13 @@ private:
 class NewProfileDialog : public QDialog {
     Q_OBJECT
 public:
+
+    //NEW PROFILE BUTTON
     NewProfileDialog(QWidget* parent = nullptr) : QDialog(parent) {
         initializeUI("Create New Profile");
     }
+
+    //ALLOW CHANGES TO CURRENT PROFILE
     NewProfileDialog(const QString& name, float basal, float carb, float correction, float target, QWidget* parent = nullptr)
         : QDialog(parent) {
         initializeUI("Edit Profile");
@@ -511,6 +539,8 @@ public:
 private:
     QLineEdit *nameEdit, *basalEdit, *carbEdit, *correctionEdit, *targetEdit;
 
+
+    //Sets up the UI elements for the Bolus calcualtion -> allowing entering information
     void initializeUI(const QString& title) {
         setWindowTitle(title);
         QFormLayout* formLayout = new QFormLayout(this);
@@ -532,7 +562,7 @@ private:
 };
 
 //--------------------------------------------------------
-// EXTENDED BOLUS DIALOG (UI per UML)
+// EXTENDED BOLUS DIALOG
 //--------------------------------------------------------
 class ExtendedBolusDialog : public QDialog {
     Q_OBJECT
@@ -543,7 +573,10 @@ public:
         durationEdit = new QLineEdit(this);
         immediateEdit = new QLineEdit(this);
         extendedEdit = new QLineEdit(this);
-        durationEdit->setText("3");    // 3 hours (simulated as 30 seconds)
+
+
+        //default value for extended bolus
+        durationEdit->setText("3");    // 3 hours
         immediateEdit->setText("60");  // 60%
         extendedEdit->setText("40");   // 40%
         formLayout->addRow("Duration:", durationEdit);
@@ -569,9 +602,16 @@ private:
 class BolusCalculationDialog : public QDialog {
     Q_OBJECT
 public:
+
+
+    // collects meal info, calculates the bolus, and then
+    // allows the user to choose immediate or extended deliver
+
     BolusCalculationDialog(Profile* profile = nullptr, IOB* iob = nullptr, InsulinCartridge* cartridge = nullptr, CGMSensor* sensor = nullptr, QWidget* parent = nullptr)
         : QDialog(parent), m_profile(profile), m_finalBolus(0.0), m_iob(iob), m_cartridge(cartridge), m_sensor(sensor)
     {
+
+        // Input page: user enters carbohydrate and BG info
         setWindowTitle("Bolus Calculator");
         stackedWidget = new QStackedWidget(this);
         QWidget* inputPage = new QWidget(this);
@@ -592,6 +632,9 @@ public:
         inputButtonLayout->addWidget(cancelButton1);
         inputLayout->addLayout(inputButtonLayout);
         stackedWidget->addWidget(inputPage);
+
+
+        // Result page - displays the bolus calculation results
         QWidget* resultPage = new QWidget(this);
         QVBoxLayout* resultLayout = new QVBoxLayout(resultPage);
         resultLabel = new QLabel(resultPage);
@@ -614,6 +657,9 @@ public:
         QVBoxLayout* mainLayout = new QVBoxLayout(this);
         mainLayout->addWidget(stackedWidget);
         setLayout(mainLayout);
+
+
+        // Connect UI buttons to speicifc actions
         connect(cancelButton1, &QPushButton::clicked, this, &QDialog::reject);
         connect(cancelButton2, &QPushButton::clicked, this, &QDialog::reject);
         connect(calculateButton, &QPushButton::clicked, this, &BolusCalculationDialog::calculateBolus);
@@ -646,6 +692,9 @@ signals:
     void immediateBolusParameters(double immediateDose);
     void mealInfoEntered(double currentBG);
 private slots:
+
+
+    // calculation and displays result
     void calculateBolus() {
         bool ok1, ok2;
         double carbs = carbsEdit->text().toDouble(&ok1);
@@ -675,10 +724,13 @@ private slots:
                           .arg(totalBolus, 0, 'f', 1)
                           .arg(m_finalBolus, 0, 'f', 1);
         resultLabel->setText(resultText);
+
+        //switch to reuslt page
         stackedWidget->setCurrentIndex(1);
     }
 private:
-    QStackedWidget* stackedWidget;
+
+    QStackedWidget* stackedWidget; // Holds input and result pages
     QLineEdit *carbsEdit, *bgEdit;
     QLabel *resultLabel, *formulaLabel;
     QPushButton *manualButton, *extendedButton;
@@ -712,6 +764,8 @@ public:
         connect(closeButton, &QPushButton::clicked, this, &ChargingDisplayDialog::accept);
     }
 public slots:
+
+    // Increases battery level until fully charged
     void onTimeout() {
         if(m_battery->level < 100) {
             m_battery->charge();
@@ -748,12 +802,16 @@ public:
         m_currentProfile(nullptr),
         m_chargingTimer(nullptr)
     {
-        // Instantiate DataManager for persistent event logging
+        // DataManager for event logging
         m_dataManager = new DataManager();
 
+        //home page
         m_mainStackedWidget = new QStackedWidget(this);
         QWidget* homePage = new QWidget(this);
         QVBoxLayout* homeLayout = new QVBoxLayout(homePage);
+
+
+        // statuses: CGM graph
         QVBoxLayout* statusLayout = new QVBoxLayout();
         m_graph_points = new QScatterSeries();
         m_graph_points->setMarkerSize(11);
@@ -784,6 +842,10 @@ public:
         chartView->setMinimumSize(QSize(500, 350));
         m_predicted_points->setColor(Qt::gray);
         statusLayout->addWidget(chartView);
+
+
+
+        //Create status boxes for battery/insulin/IOB/CGM
         QHBoxLayout* boxDataLayout = new QHBoxLayout();
         batteryBox = createStatusBox("Battery", QString::number(m_battery->getStatus()));
         insulinBox = createStatusBox("Insulin", QString::number(m_cartridge->getInsulinLevel()));
@@ -798,6 +860,9 @@ public:
         statusLayout->addWidget(boxDataFrame);
         QGroupBox* statusGroup = new QGroupBox("Pump Status", homePage);
         statusGroup->setLayout(statusLayout);
+
+
+        //get the profile stuff - CRUD operations
         QGroupBox* profileGroup = new QGroupBox("Personal Profiles", homePage);
         currentProfileLabel = new QLabel("No profile loaded.", homePage);
         QPushButton* createProfileButton = new QPushButton("Create New Profile", homePage);
@@ -809,6 +874,9 @@ public:
         profileLayout->addWidget(editProfileButton);
         profileLayout->addWidget(deleteProfileButton);
         profileGroup->setLayout(profileLayout);
+
+
+        //LOGGING EVERYTHING - // Displays a log of all events (bolus, basal, errors)
         QGroupBox* logGroup = new QGroupBox("Event Log", homePage);
         m_logTextEdit = new QTextEdit(homePage);
         m_logTextEdit->setReadOnly(true);
@@ -823,10 +891,17 @@ public:
         QPushButton* historyButton = new QPushButton("History", homePage);
         QPushButton* chargeButton = new QPushButton("Charge", homePage);
         QPushButton* basalButton = new QPushButton("Start Basal Delivery", homePage);
-        // NEW: Simulation buttons now toggle the error condition.
-        QPushButton* disconnectButton = new QPushButton("Toggle CGM Disconnect", homePage);
+
+
+
+        // you can connect and disconnect the CGM
+        QPushButton* disconnectButton = new QPushButton("Toggle Disconnects CGM", homePage);
         QPushButton* occlusionButton = new QPushButton("Toggle Occlusion", homePage);
         QHBoxLayout* navLayout = new QHBoxLayout();
+
+
+
+        ///Buttons for stuff
         navLayout->addWidget(bolusButton);
         navLayout->addWidget(optionsButton);
         navLayout->addWidget(historyButton);
@@ -837,13 +912,18 @@ public:
         homeLayout->addWidget(statusGroup);
         homeLayout->addLayout(profileAndLogLayout);
         homeLayout->addLayout(navLayout);
+
+
+        // Basal Delivery status label gives basal statuses
         basalStatusLabel = new QLabel("Basal Delivery not started.", homePage);
         basalStatusLabel->setStyleSheet("background-color: lightgreen; padding: 4px;");
         basalStatusLabel->setAlignment(Qt::AlignCenter);
         basalStatusLabel->setFixedHeight(30);
         homeLayout->addWidget(basalStatusLabel);
 
-        // History Screen: replace the simple label with a read-only text edit.
+
+
+        // History DISPLAYS
         QWidget* historyPage = new QWidget(this);
         QVBoxLayout* historyLayout = new QVBoxLayout(historyPage);
         m_historyTextEdit = new QTextEdit(historyPage);
@@ -852,15 +932,24 @@ public:
         historyLayout->addWidget(m_historyTextEdit);
         historyLayout->addWidget(backFromHistory);
 
+
+        //options page
         QWidget* optionsPage = new QWidget(this);
         QVBoxLayout* optionsLayout = new QVBoxLayout(optionsPage);
         QLabel* optionsLabel = new QLabel("Options Screen", optionsPage);
         QPushButton* backFromOptions = new QPushButton("Back", optionsPage);
         optionsLayout->addWidget(optionsLabel);
         optionsLayout->addWidget(backFromOptions);
+
+
+
+        // Add pages to the stacked widget
         m_mainStackedWidget->addWidget(homePage);     // index 0: Home
         m_mainStackedWidget->addWidget(optionsPage);    // index 1: Options
         m_mainStackedWidget->addWidget(historyPage);      // index 2: History
+
+
+        //NavigationManager for screen switching
         m_navManager = new NavigationManager(m_mainStackedWidget);
         connect(bolusButton, &QPushButton::clicked, this, &HomeScreenWidget::onBolus);
         connect(optionsButton, &QPushButton::clicked, this, [this]() { m_navManager->navigateToOptions(); });
@@ -868,41 +957,56 @@ public:
         connect(historyButton, &QPushButton::clicked, this, [this]() { updateHistory(); m_navManager->navigateToHistory(); });
         connect(chargeButton, &QPushButton::clicked, this, &HomeScreenWidget::onCharge);
         connect(basalButton, &QPushButton::clicked, this, &HomeScreenWidget::startBasalDelivery);
-        // NEW: Toggle simulation buttons with system event logging.
+
+
+
+        // Allows to turn off the error simuatlions
         connect(disconnectButton, &QPushButton::clicked, this, [this, disconnectButton]() {
             if(m_sensor->isConnected()){
                 m_sensor->disconnectSensor();
                 disconnectButton->setText("Toggle CGM Reconnect");
-                addLog("[SYSTEM EVENT] Simulated CGM disconnect.");
+                addLog("Simulated CGM disconnect.");
             } else {
                 m_sensor->connectSensor();
                 disconnectButton->setText("Toggle CGM Disconnect");
-                addLog("[SYSTEM EVENT] Simulated CGM reconnected.");
+                addLog("Simulated CGM reconnected.");
             }
             updateStatus();
         });
+
+
+
+        //Occulsions
         connect(occlusionButton, &QPushButton::clicked, this, [this, occlusionButton]() {
             if(!m_cartridge->isOccluded()){
                 m_cartridge->setOcclusion(true);
                 occlusionButton->setText("Clear Occlusion");
-                addLog("[SYSTEM EVENT] Simulated Occlusion detected.");
+                addLog("Simulated Occlusion detected.");
             } else {
                 m_cartridge->setOcclusion(false);
                 occlusionButton->setText("Toggle Occlusion");
-                addLog("[SYSTEM EVENT] Simulated Occlusion cleared.");
+                addLog("Simulated Occlusion cleared.");
             }
             updateStatus();
         });
+
+
+        // put into the navigation of home
         connect(backFromOptions, &QPushButton::clicked, this, [this]() { m_navManager->navigateToHome(); });
         connect(backFromHistory, &QPushButton::clicked, this, [this]() { m_navManager->navigateToHome(); });
         QVBoxLayout* mainLayoutWidget = new QVBoxLayout(this);
         mainLayoutWidget->addWidget(m_mainStackedWidget);
         setLayout(mainLayoutWidget);
+
+        // connect profile management buttons
         connect(createProfileButton, &QPushButton::clicked, this, &HomeScreenWidget::onCreateProfile);
         connect(editProfileButton, &QPushButton::clicked, this, &HomeScreenWidget::onEditProfile);
         connect(deleteProfileButton, &QPushButton::clicked, this, &HomeScreenWidget::onDeleteProfile);
     }
 public slots:
+
+
+    // Refreshes the indicators (PUMP STATUSES)
     void updateStatus() {
         batteryBox->setText("Battery\n" + QString::number(m_battery->getStatus()));
         insulinBox->setText("Insulin\n" + QString::number(m_cartridge->getInsulinLevel()));
@@ -910,6 +1014,8 @@ public slots:
         cgmBox->setText("CGM\n" + QString::number(m_sensor->getGlucoseLevel()) + " mmol/L");
         updateGraph();
     }
+
+    // Creates a new user profile
     void onCreateProfile() {
         NewProfileDialog dlg(this);
         if(dlg.exec() == QDialog::Accepted) {
@@ -930,6 +1036,9 @@ public slots:
             addLog("[PROFILE EVENT] Created profile: " + name);
         }
     }
+
+
+    //EDITING profile screen
     void onEditProfile() {
         if(!m_currentProfile) {
             QMessageBox::warning(this, "Edit Profile", "No profile loaded to edit.");
@@ -950,6 +1059,8 @@ public slots:
             addLog("[PROFILE EVENT] Updated profile: " + QString::fromStdString(m_currentProfile->getName()));
         }
     }
+
+    //deleting profile screen
     void onDeleteProfile() {
         if(!m_currentProfile) {
             QMessageBox::warning(this, "Delete Profile", "No profile loaded to delete.");
@@ -967,7 +1078,12 @@ public slots:
             m_logTextEdit->clear();
         }
     }
+
+
+    //Log the event
     void onBolus() {
+
+        //Manual bolus loggin
         BolusCalculationDialog dlg(m_currentProfile, m_iob, m_cartridge, m_sensor, this);
         connect(&dlg, &BolusCalculationDialog::mealInfoEntered, this, [this](double newBG) {
             m_sensor->updateGlucoseData(newBG);
@@ -988,6 +1104,9 @@ public slots:
             });
             mealRiseTimer->start(5000);
         });
+
+
+        //Extended bolus logging
         connect(&dlg, &BolusCalculationDialog::extendedBolusParameters, this,
                 [this](double duration, double immediateDose, double extendedDose, double ratePerHour) {
                     int totalTicks = static_cast<int>(duration);
@@ -1037,6 +1156,10 @@ public slots:
                     });
                     cgmTimer->start(10000);
                 });
+
+
+
+        // Erorr handling for not enough insulin for cartridge
         connect(&dlg, &BolusCalculationDialog::immediateBolusParameters, this, [this](double bolus) {
             if (m_cartridge && m_cartridge->getInsulinLevel() < bolus) {
                 QMessageBox::warning(this, "Insufficient Insulin",
@@ -1053,6 +1176,9 @@ public slots:
                 m_battery->discharge();
             addLog(QString("[BOLUS EVENT] Immediate Bolus Delivered: %1 u").arg(bolus, 0, 'f', 1));
             updateStatus();
+
+
+            //Hnadle the bolus update
             QTimer* cgmTimer = new QTimer(this);
             connect(cgmTimer, &QTimer::timeout, this, [=]() {
                 double currentBG = m_sensor->getGlucoseLevel();
@@ -1061,9 +1187,13 @@ public slots:
                     double updated = currentBG - 0.5;
                     if (updated < targetBG)
                         updated = targetBG;
+
+
                     m_sensor->updateGlucoseData(updated);
                     updateStatus();
                     addLog(QString("[BOLUS EVENT] CGM updated: %1 mmol/L").arg(updated, 0, 'f', 2));
+
+
                 } else {
                     cgmTimer->stop();
                     cgmTimer->deleteLater();
@@ -1088,6 +1218,9 @@ public slots:
             addLog("[SYSTEM EVENT] Charging stopped.");
             return;
         }
+
+
+        //Indicate on screen that it is charging
         chargeButton->setStyleSheet("background-color: green; color: white;");
         addLog("[SYSTEM EVENT] Charging started...");
         m_chargingTimer = new QTimer(this);
