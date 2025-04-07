@@ -8,7 +8,7 @@
 #include <QtCharts/QSplineSeries>
 #include <QtCharts/QLineSeries>
 
-QT_CHARTS_USE_NAMESPACE
+// QT_CHARTS_USE_NAMESPACE
 
 class ProfileManager;
 class Battery;

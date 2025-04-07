@@ -15,3 +15,5 @@ HEADERS += \
     $$files(src/*.h, true)
 
 FORMS += mainwindow.ui
+
+CONFIG  += c++17
