@@ -1,18 +1,17 @@
-QT += core gui widgets charts
+QT += core gui charts widgets
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
-CONFIG += c++17
-
-TARGET = InsulinPump
+TARGET = insulinpump
 TEMPLATE = app
 
 SOURCES += \
     main.cpp \
-    mainwindow.cpp
+    mainwindow.cpp \
+    $$files(src/*.cpp, true)
 
 HEADERS += \
-    mainwindow.h
+    mainwindow.h \
+    $$files(src/*.h, true)
 
-FORMS += \
-    mainwindow.ui
+FORMS += mainwindow.ui

@@ -1,15 +1,11 @@
 #include "mainwindow.h"
-#include "ui_mainwindow.h"
+#include "src/widgets/pumpsimulatormainwidget.h"
 
-MainWindow::MainWindow(QWidget *parent)
+MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
-    , ui(new Ui::MainWindow)
 {
-    ui->setupUi(this);
+    setWindowTitle("t:slim X2 Insulin Pump Simulator");
+    auto* sim = new PumpSimulatorMainWidget(this);
+    setCentralWidget(sim);
+    resize(650, 550);
 }
-
-MainWindow::~MainWindow()
-{
-    delete ui;
-}
-
