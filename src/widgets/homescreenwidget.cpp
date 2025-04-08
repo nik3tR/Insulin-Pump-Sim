@@ -467,7 +467,7 @@ void HomeScreenWidget::startBasalDelivery() {
 
     m_basalTimer = new QTimer(this);
     connect(m_basalTimer, &QTimer::timeout, this, [=]() {
-        // NEW CHECK: Don't deliver if simulation is paused
+        // new + CHECK!!!!!!: dont deliver if simulation is paused
         if (m_simulationPaused || m_basalPaused) return;
 
         if (m_sensor)
