@@ -8,7 +8,7 @@
 #include <QtCharts/QSplineSeries>
 #include <QtCharts/QLineSeries>
 
-// QT_CHARTS_USE_NAMESPACE
+QT_CHARTS_USE_NAMESPACE
 
 class ProfileManager;
 class Battery;
@@ -58,6 +58,11 @@ private:
     QTextEdit *m_historyTextEdit;
     QLabel *basalStatusLabel;
     QStackedWidget* m_mainStackedWidget;
+
+    bool m_simulationPaused = false; // new
+    QTimer* m_basalTimer = nullptr;
+    float m_basalRatePerTick = 0.0f; // basically is the basal rate per hour in the simulation, tick is anotherway to reefer to this time stamp
+    bool m_basalPaused = false;
 
     ProfileManager* m_profileManager;
     Battery* m_battery;
