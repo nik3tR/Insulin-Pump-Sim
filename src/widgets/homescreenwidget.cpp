@@ -116,11 +116,14 @@ HomeScreenWidget::HomeScreenWidget(ProfileManager* profileManager,
     QPushButton* basalButton     = new QPushButton("Start Basal Delivery", homePage);
     QPushButton* disconnectBtn   = new QPushButton("Toggle Disconnects CGM", homePage);
     QPushButton* occlusionBtn    = new QPushButton("Toggle Occlusion", homePage);
+    QPushButton* pauseSimButton = new QPushButton("Pause Simulation", homePage);
+
     QHBoxLayout* navLayout = new QHBoxLayout();
     navLayout->addWidget(bolusButton); navLayout->addWidget(optionsButton);
     navLayout->addWidget(historyButton); navLayout->addWidget(chargeButton);
     navLayout->addWidget(basalButton); navLayout->addWidget(disconnectBtn);
     navLayout->addWidget(occlusionBtn);
+    navLayout->addWidget(pauseSimButton);
 
     // Basal Label
     basalStatusLabel = new QLabel("Basal Delivery not started.", homePage);
@@ -181,6 +184,20 @@ HomeScreenWidget::HomeScreenWidget(ProfileManager* profileManager,
         updateStatus();
         addLog(QString("[SIMULATION] Occlusion %1").arg(m_cartridge->isOccluded() ? "enabled" : "cleared"));
     });
+
+    connect(pauseSimButton, &QPushButton::clicked, this, [=]() {
+        m_simulationPaused = !m_simulationPaused;
+
+        if (m_simulationPaused) {
+            pauseSimButton->setText("Resume Simulation");
+            basalStatusLabel->setText("Simulation paused.");
+            addLog("[SYSTEM] Simulation paused.");
+        } else {
+            pauseSimButton->setText("Pause Simulation");
+            basalStatusLabel->setText("Simulation resumed.");
+            addLog("[SYSTEM] Simulation resumed.");
+        }
+    });
 }
 
 //--------------------------------------------------------
@@ -192,6 +209,13 @@ void HomeScreenWidget::updateStatus() {
     iobBox->setText("IOB\n" + QString::number(m_iob->getIOB()));
     cgmBox->setText("CGM\n" + QString::number(m_sensor->getGlucoseLevel()) + " mmol/L");
     updateGraph();
+
+    // resumes delibvery once cgm is at a safe range
+    if (m_basalPaused && m_sensor->getGlucoseLevel() >= 4.1f) {
+        m_basalPaused = false;
+        basalStatusLabel->setText("Basal resumed: CGM safe");
+        addLog("[CONTROL IQ] Basal resumed.");
+    }
 }
 
 //--------------------------------------------------------
@@ -250,7 +274,30 @@ void HomeScreenWidget::onCreateProfile() {
 
         m_profileManager->createProfile(profile);
         m_currentProfile = m_profileManager->selectProfile(name.toStdString());
+
+        if (m_basalTimer) {
+            m_basalTimer->stop();
+            m_basalTimer->deleteLater();
+            m_basalTimer = nullptr;
+        }
+        m_basalPaused = false;
+        basalStatusLabel->setText("Basal Delivery not started.");
+
+        // reset all the stuff
+        if (m_iob)
+            m_iob->updateIOB(0.0f);
+        if (m_cartridge)
+            m_cartridge->updateInsulinLevel(200.0f);
+        if (m_sensor)
+            m_sensor->updateGlucoseData(5.5f);
+
+        // reset graph points  as wellll
+        m_graph_points->clear();
+        m_predicted_points->clear();
+        m_graph_line->clear();
+
         updateProfileDisplay();
+        updateStatus();
         m_logTextEdit->clear();
         addLog("[PROFILE EVENT] Created profile: " + name);
     }
@@ -392,6 +439,7 @@ void HomeScreenWidget::onBolus() {
 //--------------------------------------------------------
 // Start basal delivery (checks and logs via BasalManager)
 //--------------------------------------------------------
+
 void HomeScreenWidget::startBasalDelivery() {
     if (!m_currentProfile) {
         QMessageBox::warning(this, "Basal Delivery", "No profile loaded.");
@@ -402,19 +450,53 @@ void HomeScreenWidget::startBasalDelivery() {
         return;
     }
 
-    float rate = m_currentProfile->getBasalRate();
-    if (rate <= 0.0f) {
+    float hourlyRate = m_currentProfile->getBasalRate();
+    if (hourlyRate <= 0.0f) {
         QMessageBox::warning(this, "Basal Delivery", "Set a valid basal rate to begin.");
         return;
     }
 
-    auto* basalMgr = new BasalManager(m_currentProfile, m_battery, m_cartridge, m_iob, m_sensor, this);
-    basalMgr->startBasalDelivery(
-        [this](const QString& msg) { addLog(msg); },
-        [this]() { updateStatus(); },
-        [this](const QString& status) { basalStatusLabel->setText(status); }
-    );
+    m_basalRatePerTick = hourlyRate;
+    m_basalPaused = false;
+
+    if (m_basalTimer) {
+        m_basalTimer->stop();
+        m_basalTimer->deleteLater();
+        m_basalTimer = nullptr;
+    }
+
+    m_basalTimer = new QTimer(this);
+    connect(m_basalTimer, &QTimer::timeout, this, [=]() {
+        // NEW CHECK: Don't deliver if simulation is paused
+        if (m_simulationPaused || m_basalPaused) return;
+
+        if (m_sensor)
+            m_sensor->updateGlucoseData(m_sensor->getGlucoseLevel() - 0.1);
+
+        // new
+        if (m_sensor && m_sensor->getGlucoseLevel() < 4.0f) {
+            m_basalPaused = true;
+            basalStatusLabel->setText("Basal paused: CGM < 3.9 mmol/L");
+            addLog("[CONTROL IQ] Basal paused due to low CGM.");
+            return;
+        }
+
+        if (m_iob)
+            m_iob->updateIOB(m_iob->getIOB() + m_basalRatePerTick);
+        if (m_cartridge)
+            m_cartridge->updateInsulinLevel(m_cartridge->getInsulinLevel() - m_basalRatePerTick);
+        if (m_battery)
+            m_battery->discharge();
+
+        updateStatus();
+        addLog(QString("[BASAL EVENT] Delivered: %1 u").arg(m_basalRatePerTick, 0, 'f', 2));
+    });
+
+    m_basalTimer->start(10000);  // every 10s
+    basalStatusLabel->setText("Basal Delivery in progress...");
+    addLog("[BASAL EVENT] Basal Delivery started.");
 }
+
 
 //--------------------------------------------------------
 // Simulates charging using a timer
