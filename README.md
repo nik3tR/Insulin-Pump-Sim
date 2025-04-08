@@ -3,7 +3,7 @@
 Simulation of an insulin pump for controlling diabetes.
 
 ## Team Members
-- Gloria Li - Traceability Matrix, Basal Insulin Delivery
+- Gloria Li - Traceability Matrix, Basal Insulin Delivery, State Machine Diagrams
 - Shirley Huang - Event handling, Profile Management, Extended Bolus, UML Diagram
 - Alex Bon - Design Decision, CGM Graphing, Sequence Diagram
 - Niket Rathod - Use Case, Bolus Delivery, Historical Data Recording
