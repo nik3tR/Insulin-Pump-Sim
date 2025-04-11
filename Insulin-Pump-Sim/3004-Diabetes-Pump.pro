@@ -8,11 +8,11 @@ TEMPLATE = app
 SOURCES += \
     main.cpp \
     mainwindow.cpp \
-    $$files(src/*.cpp, true)
+    $$files(src/*.cpp, true) \
 
 HEADERS += \
     mainwindow.h \
-    $$files(src/*.h, true)
+    $$files(src/*.h, true) \
 
 FORMS += mainwindow.ui
 

@@ -7,6 +7,7 @@
 #include <QtCharts/QScatterSeries>
 #include <QtCharts/QSplineSeries>
 #include <QtCharts/QLineSeries>
+#include "graphwidget.h"
 
 QT_CHARTS_USE_NAMESPACE
 
@@ -71,11 +72,7 @@ private:
     CGMSensor* m_sensor;
     Profile* m_currentProfile;
     QTimer* m_chargingTimer;
-
-    QChart* m_chart;
-    QScatterSeries* m_graph_points;
-    QScatterSeries* m_predicted_points;
-    QSplineSeries* m_graph_line;
+    GraphWidget* m_graphWidget;
 
     DataManager* m_dataManager;
     NavigationManager* m_navManager;
