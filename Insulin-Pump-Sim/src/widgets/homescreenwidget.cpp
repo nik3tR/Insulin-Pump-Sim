@@ -1,35 +1,4 @@
 #include "homescreenwidget.h"
-#include "src/models/profilemanager.h"
-#include "src/models/battery.h"
-#include "src/models/insulincartridge.h"
-#include "src/models/iob.h"
-#include "src/models/cgmsensor.h"
-#include "src/models/profile.h"
-#include "src/dialogs/newprofiledialog.h"
-#include "src/dialogs/boluscalculationdialog.h"
-#include "src/dialogs/chargingdisplaydialog.h"
-#include "src/utils/navigationmanager.h"
-#include "src/utils/datamanager.h"
-#include "src/logic/basalmanager.h"
-
-#include <QtCharts/QChartView>
-#include <QtCharts/QChart>
-#include <QtCharts/QScatterSeries>
-#include <QtCharts/QSplineSeries>
-#include <QtCharts/QLineSeries>
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QFormLayout>
-#include <QGroupBox>
-#include <QLabel>
-#include <QPushButton>
-#include <QStackedWidget>
-#include <QTimer>
-#include <QTextEdit>
-#include <QMessageBox>
-#include <QFrame>
-#include <QPainter>
-#include <QDateTime>
 
 // QT_CHARTS_USE_NAMESPACE
 
@@ -54,10 +23,12 @@ HomeScreenWidget::HomeScreenWidget(ProfileManager* profileManager,
     QWidget* homePage = new QWidget(this);
     QVBoxLayout* homeLayout = new QVBoxLayout(homePage);
 
+    // create graph
     m_graphWidget = new GraphWidget(homePage);
-
     QVBoxLayout* statusLayout = new QVBoxLayout();
     statusLayout->addWidget(m_graphWidget);
+
+    // create battery, insulin, iob, cgm status boxes
     QHBoxLayout* boxLayout = new QHBoxLayout();
     batteryBox = createStatusBox("Battery", QString::number(m_battery->getStatus()));
     insulinBox = createStatusBox("Insulin", QString::number(m_cartridge->getInsulinLevel()));
@@ -119,10 +90,28 @@ HomeScreenWidget::HomeScreenWidget(ProfileManager* profileManager,
     homeLayout->addLayout(navLayout);
     homeLayout->addWidget(basalStatusLabel);
 
+    // ------------
     // Options Page
+    // ------------
     QWidget* optionsPage = new QWidget(this);
     QVBoxLayout* optionsLayout = new QVBoxLayout(optionsPage);
-    optionsLayout->addWidget(new QLabel("Options Screen", optionsPage));
+    optionsLayout->setContentsMargins(10, 10, 10, 10);
+    optionsLayout->setSpacing(10);
+
+    // Create and style the title label
+    QLabel* titleLabel = new QLabel("Current Profile:", optionsPage);
+    QFont titleFont = titleLabel->font();
+    titleFont.setPointSize(16);
+    titleFont.setBold(true);
+    titleLabel->setFont(titleFont);
+    optionsLayout->addWidget(titleLabel);
+
+    // create and fill the profile selector box
+    QComboBox* profileSelector = new QComboBox(optionsPage);
+    refreshProfileList(profileSelector);
+    optionsLayout->addWidget(profileSelector);
+    optionsLayout->addStretch();
+
     QPushButton* backFromOptions = new QPushButton("Back", optionsPage);
     optionsLayout->addWidget(backFromOptions);
 
@@ -146,7 +135,6 @@ HomeScreenWidget::HomeScreenWidget(ProfileManager* profileManager,
 
     // --- Connections ---
     connect(bolusButton, &QPushButton::clicked, this, &HomeScreenWidget::onBolus);
-    connect(optionsButton, &QPushButton::clicked, this, [=](){ m_navManager->navigateToOptions(); });
     connect(historyButton, &QPushButton::clicked, this, [=](){ updateHistory(); m_navManager->navigateToHistory(); });
     connect(backFromOptions, &QPushButton::clicked, this, [=](){ m_navManager->navigateToHome(); });
     connect(backFromHistory, &QPushButton::clicked, this, [=](){ m_navManager->navigateToHome(); });
@@ -155,6 +143,30 @@ HomeScreenWidget::HomeScreenWidget(ProfileManager* profileManager,
     connect(deleteProfileButton, &QPushButton::clicked, this, &HomeScreenWidget::onDeleteProfile);
     connect(chargeButton,        &QPushButton::clicked, this, &HomeScreenWidget::onCharge);
     connect(basalButton,         &QPushButton::clicked, this, &HomeScreenWidget::startBasalDelivery);
+
+    connect(optionsButton, &QPushButton::clicked, this, [=](){
+        refreshProfileList(profileSelector);
+        m_navManager->navigateToOptions(); }
+    );
+
+    // connect profileSelector to the current profile
+    connect(profileSelector, QOverload<int>::of(&QComboBox::currentIndexChanged),
+        this, [this, profileSelector](int index) {
+            if (index >= 0) {
+                // Extract the profile name
+                QString profileNameQString = profileSelector->itemData(index).toString();
+                std::string profileName = profileNameQString.toStdString();
+
+                // Use selectProfile to get the Profile* and update m_currentProfile
+                m_currentProfile = m_profileManager->selectProfile(profileName);
+
+                if (m_currentProfile) {
+                    updateProfileDisplay();
+                    addLog(QString("[PROFILE EVENT] Switched to profile: %1")
+                           .arg(profileNameQString));
+                }
+            }
+        });
 
     connect(disconnectBtn, &QPushButton::clicked, this, [=]() {
         m_sensor->isConnected() ? m_sensor->disconnectSensor() : m_sensor->connectSensor();
@@ -520,4 +532,20 @@ void HomeScreenWidget::updateGraph() {
         m_graphWidget->updateGraph(m_sensor->getGlucoseLevel());
     }
 }
+
+// repopulate/refresh profile list when options button is clicked
+
+void HomeScreenWidget::refreshProfileList(QComboBox* profileSelector) {
+    profileSelector->clear();
+    for (const auto& profile : m_profileManager->getProfiles()) {
+        QString itemText = QString("%1 - Basal: %2 u/hr, Carb: 1u/%3 g, Correction: 1u/%4 mmol/L, Target: %5 mmol/L")
+            .arg(QString::fromStdString(profile.getName()))
+            .arg(profile.getBasalRate())
+            .arg(profile.getCarbRatio())
+            .arg(profile.getCorrectionFactor())
+            .arg(profile.getTargetGlucose());
+        profileSelector->addItem(itemText, QString::fromStdString(profile.getName()));
+    }
+}
+
 

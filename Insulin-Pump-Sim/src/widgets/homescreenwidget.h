@@ -2,12 +2,39 @@
 #define HOMESCREENWIDGET_H
 
 #include <QWidget>
-#include <QtCharts/QChart>
+#include "src/models/profilemanager.h"
+#include "src/models/battery.h"
+#include "src/models/insulincartridge.h"
+#include "src/models/iob.h"
+#include "src/models/cgmsensor.h"
+#include "src/models/profile.h"
+#include "src/dialogs/newprofiledialog.h"
+#include "src/dialogs/boluscalculationdialog.h"
+#include "src/dialogs/chargingdisplaydialog.h"
+#include "src/utils/navigationmanager.h"
+#include "src/utils/datamanager.h"
+#include "src/logic/basalmanager.h"
+#include "src/widgets/graphwidget.h"
+
 #include <QtCharts/QChartView>
+#include <QtCharts/QChart>
 #include <QtCharts/QScatterSeries>
 #include <QtCharts/QSplineSeries>
 #include <QtCharts/QLineSeries>
-#include "graphwidget.h"
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QFormLayout>
+#include <QGroupBox>
+#include <QLabel>
+#include <QPushButton>
+#include <QStackedWidget>
+#include <QTimer>
+#include <QTextEdit>
+#include <QMessageBox>
+#include <QFrame>
+#include <QPainter>
+#include <QDateTime>
+#include <QComboBox>
 
 QT_CHARTS_USE_NAMESPACE
 
@@ -52,6 +79,7 @@ private:
     void addLog(const QString& message);
     void updateHistory();
     void updateGraph();
+    void refreshProfileList(QComboBox* profileSelector);
 
     QLabel *batteryBox, *insulinBox, *iobBox, *cgmBox;
     QLabel *currentProfileLabel;

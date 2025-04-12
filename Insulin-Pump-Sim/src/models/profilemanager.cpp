@@ -1,6 +1,4 @@
 #include "profilemanager.h"
-
-#include "profilemanager.h"
 #include <algorithm>
 
 void ProfileManager::createProfile(const Profile& profile) {
