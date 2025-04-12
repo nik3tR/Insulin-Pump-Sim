@@ -4,13 +4,16 @@
 #include <QDialog>
 #include <QLineEdit>
 
-//--------------------------------------------------------
-// PIN DIALOG
-//--------------------------------------------------------
+// Enum to specify dialog mode
+enum class PinMode {
+    Verify,
+    Set
+};
+
 class PINDialog : public QDialog {
     Q_OBJECT
 public:
-    explicit PINDialog(const QString& expectedPin, QWidget* parent = nullptr);
+    explicit PINDialog(PinMode mode, const QString& expectedPin = "", QWidget* parent = nullptr);
     QString enteredPIN() const;
 
 private slots:
@@ -19,7 +22,7 @@ private slots:
 private:
     QLineEdit* pinEdit;
     QString m_expectedPin;
+    PinMode m_mode;
 };
-
 
 #endif // PINDIALOG_H

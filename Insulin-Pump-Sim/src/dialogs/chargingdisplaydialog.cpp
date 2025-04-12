@@ -1,11 +1,11 @@
 #include "chargingdisplaydialog.h"
-#include "src/models/battery.h"
-#include <QVBoxLayout>
-#include <QPushButton>
+#include <iostream>
 
-// Simulates battery charging interface
 ChargingDisplayDialog::ChargingDisplayDialog(Battery* battery, QWidget* parent)
-    : QDialog(parent), m_battery(battery) {
+    : QDialog(parent), m_battery(battery)
+{
+
+
     setWindowTitle("Charging Interface");
     QVBoxLayout* layout = new QVBoxLayout(this);
     batteryLabel = new QLabel("Battery Level: " + QString::number(m_battery->getStatus()), this);
@@ -20,13 +20,12 @@ ChargingDisplayDialog::ChargingDisplayDialog(Battery* battery, QWidget* parent)
     connect(closeButton, &QPushButton::clicked, this, &ChargingDisplayDialog::accept);
 }
 
-// Simulates charging increments
 void ChargingDisplayDialog::onTimeout() {
-    if (m_battery->level < 100) {
+    if(m_battery->level < 100) {
         m_battery->charge();
         batteryLabel->setText("Battery Level: " + QString::number(m_battery->getStatus()));
+        std::cout << "[ChargingDisplayDialog] Battery level: " << m_battery->getStatus() << "\n";
     } else {
         m_timer->stop();
     }
 }
-

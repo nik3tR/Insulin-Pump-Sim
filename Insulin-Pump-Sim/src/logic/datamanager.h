@@ -3,17 +3,17 @@
 
 #include <QString>
 #include <QStringList>
+#include <QDateTime>
 
 //--------------------------------------------------------
-// DATA MANAGER
-// Responsible for logging time-stamped events and exposing history
+// DATA MANAGER (New for event history logging)
 //--------------------------------------------------------
 class DataManager {
 public:
     void logEvent(const QString& event);
     QString getHistory() const;
-    QString analyzeUsage() const; // placeholder for future insights
-
+    // Placeholder for potential future usage analysis.
+    QString analyzeUsage() const;
 private:
     QStringList eventHistory;
 };

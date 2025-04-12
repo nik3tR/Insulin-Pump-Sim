@@ -10,3 +10,13 @@ float IOB::getIOB() const {
     return activeInsulinUnits;
 }
 
+
+void IOB::decay(float decayRate) {
+    activeInsulinUnits -= decayRate;
+    if (activeInsulinUnits < 0.0f)
+        activeInsulinUnits = 0.0f;
+}
+
+bool IOB::isActive() const {
+    return activeInsulinUnits > 0.0f;
+}

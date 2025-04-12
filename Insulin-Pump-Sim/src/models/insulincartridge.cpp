@@ -1,14 +1,13 @@
 #include "insulincartridge.h"
 
-InsulinCartridge::InsulinCartridge()
-    : insulinLevel(300), occluded(false) {}
+InsulinCartridge::InsulinCartridge() : insulinLevel(300), occluded(false) {}
 
 void InsulinCartridge::updateInsulinLevel(int newLevel) {
     insulinLevel = newLevel;
 }
 
 void InsulinCartridge::refill() {
-    insulinLevel = 300;
+    insulinLevel = 300; //Default Insulin
 }
 
 int InsulinCartridge::getInsulinLevel() const {

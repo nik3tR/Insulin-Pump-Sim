@@ -1,15 +1,13 @@
 #include "newprofiledialog.h"
 
-#include <QFormLayout>
-#include <QDialogButtonBox>
-
-NewProfileDialog::NewProfileDialog(QWidget* parent)
-    : QDialog(parent) {
+NewProfileDialog::NewProfileDialog(QWidget* parent) : QDialog(parent) {
     initializeUI("Create New Profile");
 }
 
+//Get information to edit new profile
 NewProfileDialog::NewProfileDialog(const QString& name, float basal, float carb, float correction, float target, QWidget* parent)
-    : QDialog(parent) {
+    : QDialog(parent)
+{
     initializeUI("Edit Profile");
     nameEdit->setText(name);
     basalEdit->setText(QString::number(basal));
@@ -18,6 +16,28 @@ NewProfileDialog::NewProfileDialog(const QString& name, float basal, float carb,
     targetEdit->setText(QString::number(target));
 }
 
+QString NewProfileDialog::getName() const {
+    return nameEdit->text();
+}
+
+float NewProfileDialog::getBasalRate() const {
+    return basalEdit->text().toFloat();
+}
+
+float NewProfileDialog::getCarbRatio() const {
+    return carbEdit->text().toFloat();
+}
+
+float NewProfileDialog::getCorrectionFactor() const {
+    return correctionEdit->text().toFloat();
+}
+
+float NewProfileDialog::getTargetGlucose() const {
+    return targetEdit->text().toFloat();
+}
+
+
+//Display the personal information
 void NewProfileDialog::initializeUI(const QString& title) {
     setWindowTitle(title);
     QFormLayout* formLayout = new QFormLayout(this);
@@ -36,9 +56,3 @@ void NewProfileDialog::initializeUI(const QString& title) {
     connect(buttonBox, &QDialogButtonBox::accepted, this, &NewProfileDialog::accept);
     connect(buttonBox, &QDialogButtonBox::rejected, this, &NewProfileDialog::reject);
 }
-
-QString NewProfileDialog::getName() const { return nameEdit->text(); }
-float NewProfileDialog::getBasalRate() const { return basalEdit->text().toFloat(); }
-float NewProfileDialog::getCarbRatio() const { return carbEdit->text().toFloat(); }
-float NewProfileDialog::getCorrectionFactor() const { return correctionEdit->text().toFloat(); }
-float NewProfileDialog::getTargetGlucose() const { return targetEdit->text().toFloat(); }
