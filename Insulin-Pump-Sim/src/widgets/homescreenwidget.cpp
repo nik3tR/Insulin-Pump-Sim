@@ -1,35 +1,4 @@
 #include "homescreenwidget.h"
-#include "src/models/profilemanager.h"
-#include "src/models/battery.h"
-#include "src/models/insulincartridge.h"
-#include "src/models/iob.h"
-#include "src/models/cgmsensor.h"
-#include "src/models/profile.h"
-#include "src/dialogs/newprofiledialog.h"
-#include "src/dialogs/boluscalculationdialog.h"
-#include "src/dialogs/chargingdisplaydialog.h"
-#include "src/utils/navigationmanager.h"
-#include "src/utils/datamanager.h"
-#include "src/logic/basalmanager.h"
-
-#include <QtCharts/QChartView>
-#include <QtCharts/QChart>
-#include <QtCharts/QScatterSeries>
-#include <QtCharts/QSplineSeries>
-#include <QtCharts/QLineSeries>
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QFormLayout>
-#include <QGroupBox>
-#include <QLabel>
-#include <QPushButton>
-#include <QStackedWidget>
-#include <QTimer>
-#include <QTextEdit>
-#include <QMessageBox>
-#include <QFrame>
-#include <QPainter>
-#include <QDateTime>
 
 // QT_CHARTS_USE_NAMESPACE
 
@@ -54,27 +23,12 @@ HomeScreenWidget::HomeScreenWidget(ProfileManager* profileManager,
     QWidget* homePage = new QWidget(this);
     QVBoxLayout* homeLayout = new QVBoxLayout(homePage);
 
-    // Graph + Status
-    m_graph_points = new QScatterSeries(); m_graph_points->setMarkerSize(11);
-    m_graph_points->setColor(Qt::black);
-    m_predicted_points = new QScatterSeries(); m_predicted_points->setMarkerSize(11);
-    m_predicted_points->setColor(Qt::gray);
-    m_graph_line = new QSplineSeries(); m_graph_line->setColor(Qt::blue);
-    QLineSeries* verticalLine = new QLineSeries();
-    verticalLine->append(0, 0); verticalLine->append(0, 15); verticalLine->setColor(Qt::green);
-    m_chart = new QChart();
-    m_chart->addSeries(m_graph_points); m_chart->addSeries(m_predicted_points);
-    m_chart->addSeries(m_graph_line); m_chart->addSeries(verticalLine);
-    m_chart->createDefaultAxes(); m_chart->legend()->setVisible(false);
-    m_chart->axes()[0]->setRange(-6, 2); m_chart->axes()[1]->setRange(2, 11);
-    m_chart->axes()[0]->setTitleText("Time (h)");
-    m_chart->axes()[1]->setTitleText("Glucose Level (mmol/L)");
-    QChartView* chartView = new QChartView(m_chart);
-    chartView->setRenderHint(QPainter::Antialiasing);
-    chartView->setMinimumSize(QSize(500, 350));
-
+    // create graph
+    m_graphWidget = new GraphWidget(homePage);
     QVBoxLayout* statusLayout = new QVBoxLayout();
-    statusLayout->addWidget(chartView);
+    statusLayout->addWidget(m_graphWidget);
+
+    // create battery, insulin, iob, cgm status boxes
     QHBoxLayout* boxLayout = new QHBoxLayout();
     batteryBox = createStatusBox("Battery", QString::number(m_battery->getStatus()));
     insulinBox = createStatusBox("Insulin", QString::number(m_cartridge->getInsulinLevel()));
@@ -136,10 +90,28 @@ HomeScreenWidget::HomeScreenWidget(ProfileManager* profileManager,
     homeLayout->addLayout(navLayout);
     homeLayout->addWidget(basalStatusLabel);
 
+    // ------------
     // Options Page
+    // ------------
     QWidget* optionsPage = new QWidget(this);
     QVBoxLayout* optionsLayout = new QVBoxLayout(optionsPage);
-    optionsLayout->addWidget(new QLabel("Options Screen", optionsPage));
+    optionsLayout->setContentsMargins(10, 10, 10, 10);
+    optionsLayout->setSpacing(10);
+
+    // Create and style the title label
+    QLabel* titleLabel = new QLabel("Current Profile:", optionsPage);
+    QFont titleFont = titleLabel->font();
+    titleFont.setPointSize(16);
+    titleFont.setBold(true);
+    titleLabel->setFont(titleFont);
+    optionsLayout->addWidget(titleLabel);
+
+    // create and fill the profile selector box
+    QComboBox* profileSelector = new QComboBox(optionsPage);
+    refreshProfileList(profileSelector);
+    optionsLayout->addWidget(profileSelector);
+    optionsLayout->addStretch();
+
     QPushButton* backFromOptions = new QPushButton("Back", optionsPage);
     optionsLayout->addWidget(backFromOptions);
 
@@ -163,7 +135,6 @@ HomeScreenWidget::HomeScreenWidget(ProfileManager* profileManager,
 
     // --- Connections ---
     connect(bolusButton, &QPushButton::clicked, this, &HomeScreenWidget::onBolus);
-    connect(optionsButton, &QPushButton::clicked, this, [=](){ m_navManager->navigateToOptions(); });
     connect(historyButton, &QPushButton::clicked, this, [=](){ updateHistory(); m_navManager->navigateToHistory(); });
     connect(backFromOptions, &QPushButton::clicked, this, [=](){ m_navManager->navigateToHome(); });
     connect(backFromHistory, &QPushButton::clicked, this, [=](){ m_navManager->navigateToHome(); });
@@ -172,6 +143,30 @@ HomeScreenWidget::HomeScreenWidget(ProfileManager* profileManager,
     connect(deleteProfileButton, &QPushButton::clicked, this, &HomeScreenWidget::onDeleteProfile);
     connect(chargeButton,        &QPushButton::clicked, this, &HomeScreenWidget::onCharge);
     connect(basalButton,         &QPushButton::clicked, this, &HomeScreenWidget::startBasalDelivery);
+
+    connect(optionsButton, &QPushButton::clicked, this, [=](){
+        refreshProfileList(profileSelector);
+        m_navManager->navigateToOptions(); }
+    );
+
+    // connect profileSelector to the current profile
+    connect(profileSelector, QOverload<int>::of(&QComboBox::currentIndexChanged),
+        this, [this, profileSelector](int index) {
+            if (index >= 0) {
+                // Extract the profile name
+                QString profileNameQString = profileSelector->itemData(index).toString();
+                std::string profileName = profileNameQString.toStdString();
+
+                // Use selectProfile to get the Profile* and update m_currentProfile
+                m_currentProfile = m_profileManager->selectProfile(profileName);
+
+                if (m_currentProfile) {
+                    updateProfileDisplay();
+                    addLog(QString("[PROFILE EVENT] Switched to profile: %1")
+                           .arg(profileNameQString));
+                }
+            }
+        });
 
     connect(disconnectBtn, &QPushButton::clicked, this, [=]() {
         m_sensor->isConnected() ? m_sensor->disconnectSensor() : m_sensor->connectSensor();
@@ -291,11 +286,7 @@ void HomeScreenWidget::onCreateProfile() {
         if (m_sensor)
             m_sensor->updateGlucoseData(5.5f);
 
-        // reset graph points  as wellll
-        m_graph_points->clear();
-        m_predicted_points->clear();
-        m_graph_line->clear();
-
+        m_graphWidget->clearGraph();
         updateProfileDisplay();
         updateStatus();
         m_logTextEdit->clear();
@@ -537,32 +528,24 @@ void HomeScreenWidget::onCharge() {
 // Scrolls chart and adds new glucose data point
 //--------------------------------------------------------
 void HomeScreenWidget::updateGraph() {
-    for (int i = 0; i < m_graph_points->count(); ++i) {
-        QPointF pt = m_graph_points->at(i);
-        if (pt.x() < -6) {
-            m_graph_points->remove(i);
-            --i;
-            continue;
-        }
-        m_graph_points->replace(i, pt.x() - 0.5, pt.y());
+    if (m_sensor) {
+        m_graphWidget->updateGraph(m_sensor->getGlucoseLevel());
     }
-
-    m_graph_points->append(QPointF(0, m_sensor->getGlucoseLevel()));
-    m_predicted_points->clear();
-
-    if (m_graph_points->count() >= 3) {
-        QPointF p0 = m_graph_points->at(m_graph_points->count() - 1);
-        QPointF p1 = m_graph_points->at(m_graph_points->count() - 2);
-        QPointF p2 = m_graph_points->at(m_graph_points->count() - 3);
-        QPointF avgDiff = ((p1 - p0) + (p2 - p1)) * 0.5;
-
-        m_predicted_points->append(p0 - avgDiff);
-        m_predicted_points->append(p0 - 2 * avgDiff);
-        m_predicted_points->append(p0 - 3 * avgDiff);
-    }
-
-    m_graph_line->clear();
-    m_graph_line->append(m_graph_points->points());
-    m_graph_line->append(m_predicted_points->points());
 }
+
+// repopulate/refresh profile list when options button is clicked
+
+void HomeScreenWidget::refreshProfileList(QComboBox* profileSelector) {
+    profileSelector->clear();
+    for (const auto& profile : m_profileManager->getProfiles()) {
+        QString itemText = QString("%1 - Basal: %2 u/hr, Carb: 1u/%3 g, Correction: 1u/%4 mmol/L, Target: %5 mmol/L")
+            .arg(QString::fromStdString(profile.getName()))
+            .arg(profile.getBasalRate())
+            .arg(profile.getCarbRatio())
+            .arg(profile.getCorrectionFactor())
+            .arg(profile.getTargetGlucose());
+        profileSelector->addItem(itemText, QString::fromStdString(profile.getName()));
+    }
+}
+
 
