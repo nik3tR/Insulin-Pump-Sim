@@ -3,8 +3,8 @@
 Battery::Battery() : level(100) {}
 
 void Battery::discharge() {
-    if (level > 0) level -= 10;
-    if (level < 0) level = 0;
+    if(level > 0) level -= 10;
+    if(level < 0) level = 0;
 }
 
 int Battery::getStatus() const {
@@ -12,5 +12,5 @@ int Battery::getStatus() const {
 }
 
 void Battery::charge() {
-    if (level < 100) level++;
+    if(level < 100) level++;
 }

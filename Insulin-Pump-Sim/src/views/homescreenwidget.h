@@ -2,30 +2,25 @@
 #define HOMESCREENWIDGET_H
 
 #include <QWidget>
+#include <QLabel>
+#include <QTextEdit>
+#include <QTimer>
+#include <QStackedWidget>
 #include <QtCharts/QChart>
-#include <QtCharts/QChartView>
 #include <QtCharts/QScatterSeries>
 #include <QtCharts/QSplineSeries>
-#include <QtCharts/QLineSeries>
+#include <QtWidgets/qboxlayout.h>
+#include <QtWidgets/qpushbutton.h>
+#include "src/models/profilemanager.h"
+#include "src/models/battery.h"
+#include "src/models/insulincartridge.h"
+#include "src/models/iob.h"
+#include "src/models/cgmsensor.h"
+#include "src/logic/navigationmanager.h"
+#include "src/logic/datamanager.h"
+#include "optionspagecontroller.h"
+#include "src/logic/insulindelivery.h"
 
-QT_CHARTS_USE_NAMESPACE
-
-class ProfileManager;
-class Battery;
-class InsulinCartridge;
-class IOB;
-class CGMSensor;
-class QLabel;
-class QTextEdit;
-class QTimer;
-class QStackedWidget;
-class Profile;
-class DataManager;
-class NavigationManager;
-
-//--------------------------------------------------------
-// HOME SCREEN WIDGET (Pump UI and Simulation Controls)
-//--------------------------------------------------------
 class HomeScreenWidget : public QWidget {
     Q_OBJECT
 public:
@@ -35,7 +30,6 @@ public:
                      IOB* iob,
                      CGMSensor* sensor,
                      QWidget* parent = nullptr);
-
 public slots:
     void updateStatus();
     void onCreateProfile();
@@ -43,27 +37,27 @@ public slots:
     void onDeleteProfile();
     void onBolus();
     void onCharge();
+    void toggleBasalDelivery();
     void startBasalDelivery();
-
-private:
-    QLabel* createStatusBox(const QString& title, const QString& value);
     void updateProfileDisplay();
-    void addLog(const QString& message);
     void updateHistory();
     void updateGraph();
-
+    void onCrashInsulin();
+    void updateOptionsPage();
+private:
+    QLabel* createStatusBox(const QString& title, const QString& value);
     QLabel *batteryBox, *insulinBox, *iobBox, *cgmBox;
     QLabel *currentProfileLabel;
-    QTextEdit *m_logTextEdit;
-    QTextEdit *m_historyTextEdit;
-    QLabel *basalStatusLabel;
+    QTextEdit* m_logTextEdit;
+    QTextEdit* m_historyTextEdit;
+    QChart* m_chart;
+    QScatterSeries* m_graph_points;
+    QScatterSeries* m_predicted_points;
+    QSplineSeries* m_graph_line;
+    QLabel* basalStatusLabel;
     QStackedWidget* m_mainStackedWidget;
-
-    bool m_simulationPaused = false; // new
-    QTimer* m_basalTimer = nullptr;
-    float m_basalRatePerTick = 0.0f; // basically is the basal rate per hour in the simulation, tick is anotherway to reefer to this time stamp
-    bool m_basalPaused = false;
-
+    QVBoxLayout* m_profileButtonsLayout;
+    DataManager* m_dataManager;
     ProfileManager* m_profileManager;
     Battery* m_battery;
     InsulinCartridge* m_cartridge;
@@ -71,14 +65,13 @@ private:
     CGMSensor* m_sensor;
     Profile* m_currentProfile;
     QTimer* m_chargingTimer;
-
-    QChart* m_chart;
-    QScatterSeries* m_graph_points;
-    QScatterSeries* m_predicted_points;
-    QSplineSeries* m_graph_line;
-
-    DataManager* m_dataManager;
     NavigationManager* m_navManager;
+    QPushButton* m_basalButton;
+    bool m_alertsEnabled;
+    OptionsPageController* m_optionsController;
+    InsulinDelivery* m_insulinDelivery;
+    void addLog(const QString &message);
+
 };
 
 #endif // HOMESCREENWIDGET_H

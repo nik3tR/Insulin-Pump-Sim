@@ -1,15 +1,13 @@
 #include "insulinpump.h"
-#include <iostream>
 
-InsulinPump::InsulinPump()
-    : state(PumpState::Off), currentProfile(nullptr) {}
+InsulinPump::InsulinPump() : state(Off), currentProfile(nullptr) {}
 
 void InsulinPump::powerOn() {
-    state = PumpState::On;
+    state = On;
 }
 
 void InsulinPump::powerOff() {
-    state = PumpState::Off;
+    state = Off;
 }
 
 void InsulinPump::navigateTo(const std::string& screen) {

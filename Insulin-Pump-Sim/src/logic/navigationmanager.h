@@ -1,9 +1,9 @@
 #ifndef NAVIGATIONMANAGER_H
 #define NAVIGATIONMANAGER_H
 
+#include <QStackedWidget>
 #include <QString>
-
-class QStackedWidget;
+#include <iostream>
 
 //--------------------------------------------------------
 // NAVIGATION MANAGER (Navigation)
@@ -11,13 +11,11 @@ class QStackedWidget;
 class NavigationManager {
 public:
     NavigationManager(QStackedWidget* stack);
-
     void navigateTo(const QString& screen);
     void navigateToOptions();
     void navigateToHistory();
     void navigateToHome();
     void navigateToBolus();
-
 private:
     QStackedWidget* m_stack;
 };

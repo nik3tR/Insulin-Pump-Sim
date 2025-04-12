@@ -1,9 +1,9 @@
 #ifndef CONTROLIQ_H
 #define CONTROLIQ_H
 
-
 //--------------------------------------------------------
-// ControlIQ: Adjusts delivery based on CGM reading
+// MODULAR CLASSES FOR INSULIN DELIVERY
+// Adjusts delivery based on CGM reading
 //--------------------------------------------------------
 class ControlIQ {
 public:

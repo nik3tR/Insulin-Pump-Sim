@@ -1,4 +1,5 @@
 #include "src/logic/bolusmanager.h"
+#include "bolusmanager.h"
 #include <algorithm>
 
 // Constructor

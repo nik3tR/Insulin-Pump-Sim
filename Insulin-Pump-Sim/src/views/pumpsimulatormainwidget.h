@@ -2,29 +2,28 @@
 #define PUMPSIMULATORMAINWIDGET_H
 
 #include <QWidget>
-#include <QString>
-
-class InsulinPump;
-class Battery;
-class InsulinCartridge;
-class IOB;
-class CGMSensor;
-class ProfileManager;
-class QPushButton;
-class HomeScreenWidget;
+#include <QPushButton>
+#include "src/models/insulinpump.h"
+#include "src/models/battery.h"
+#include "src/models/insulincartridge.h"
+#include "src/models/iob.h"
+#include "src/models/cgmsensor.h"
+#include "src/models/profilemanager.h"
+#include "homescreenwidget.h"
 
 //--------------------------------------------------------
-// PUMP SIMULATOR MAIN WIDGET
-// This class acts as the entry widget for the simulator.
+// PUMP SIMULATOR MAIN WIDGET (Modified for PIN setup)
 //--------------------------------------------------------
 class PumpSimulatorMainWidget : public QWidget {
     Q_OBJECT
 public:
-    explicit PumpSimulatorMainWidget(QWidget* parent = nullptr);
-
-private slots:
+    PumpSimulatorMainWidget(QWidget* parent = nullptr);
+public slots:
     void onPowerToggled(bool checked);
-
+    // Toggle pump power state from Options page.
+    void togglePump();
+    // Update the stored PIN (used when PIN is changed in options).
+    void setUserPIN(const QString &newPIN);
 private:
     InsulinPump* m_pump;
     Battery* m_battery;
@@ -32,11 +31,9 @@ private:
     IOB* m_iob;
     CGMSensor* m_sensor;
     ProfileManager* m_profileManager;
-
     QPushButton* m_powerButton;
     HomeScreenWidget* m_homeScreen;
     QString m_userPIN;
 };
-
 
 #endif // PUMPSIMULATORMAINWIDGET_H
