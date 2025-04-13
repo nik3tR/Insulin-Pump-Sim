@@ -14,7 +14,7 @@ PINDialog::PINDialog(PinMode mode, const QString& expectedPin, QWidget* parent)
     layout->addWidget(label);
 
     pinEdit = new QLineEdit(this);
-    pinEdit->setEchoMode(QLineEdit::Password);
+    pinEdit->setEchoMode(QLineEdit::Normal);
     layout->addWidget(pinEdit);
 
     QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);

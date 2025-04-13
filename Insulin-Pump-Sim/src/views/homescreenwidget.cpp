@@ -125,7 +125,7 @@ HomeScreenWidget::HomeScreenWidget(ProfileManager* profileManager,
     QPushButton* optionsButton = new QPushButton("Options", homePage);
     QPushButton* historyButton = new QPushButton("History", homePage);
     QPushButton* chargeButton = new QPushButton("Charge", homePage);
-    m_basalButton = new QPushButton("Start Basal Delivery", homePage);
+    m_basalButton = new QPushButton("Basal Delivery", homePage);
     QPushButton* disconnectButton = new QPushButton("Toggle Disconnects CGM", homePage);
     QPushButton* occlusionButton = new QPushButton("Toggle Occlusion", homePage);
     QHBoxLayout* navLayout = new QHBoxLayout();
