@@ -35,15 +35,19 @@ void BasalManager::startBasalDelivery(std::function<void(const QString&)> logCal
 
     connect(m_timer, &QTimer::timeout, this, [=]() mutable {
         // Battery Check
+
+        if (m_battery && m_battery->getStatus() <= 20) {
+            logCallback("[SYSTEM] 🪫 Low Battery ->  Battery is low -> Deliverying final doses.");
+        }
+
+
         if (m_battery && m_battery->getStatus() == 0) {
             logCallback("Battery fully drained -> Basal Delivery paused.");
             basalStatusCallback("Basal Paused (Battery 0%)");
             pause();
             return;
         }
-        if (m_battery && m_battery->getStatus() <= 15) {
-            logCallback("[SYSTEM] 🪫 Low Battery ->  Battery is low (15%).");
-        }
+
 
         // CGM Disconnection / Occlusion
         if (m_sensor && !m_sensor->isConnected()) {

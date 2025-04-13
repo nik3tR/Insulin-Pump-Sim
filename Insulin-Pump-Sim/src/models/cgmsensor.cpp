@@ -1,6 +1,6 @@
 #include "cgmsensor.h"
 
-CGMSensor::CGMSensor() : currentGlucoseLevel(5.5f), connected(true) {}
+CGMSensor::CGMSensor() : currentGlucoseLevel(5.0f), connected(true) {}
 
 float CGMSensor::getGlucoseLevel() const {
     return currentGlucoseLevel;

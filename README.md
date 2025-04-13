@@ -12,13 +12,12 @@ Simulation of an insulin pump for controlling diabetes.
 - DesignDocuments.pdf
 
 ### Simulation
-- Link to Simulation: TBD
+- Link to Simulation: https://youtu.be/Q0SSV6Ac_ak
 
 ### Use Case Models
 - UseCase.pdf
 
 ### UML Class Diagram
-- UMLClass.png -> Old/Messy full UML class diagram. Please refer to the seperated UML Class
 - UMLClass_Logic.png -> UML Class diagram from the logic behind the insulin pump
 - UMLClass_UI.png -> UML class diagram for the displays
 
@@ -30,12 +29,15 @@ Simulation of an insulin pump for controlling diabetes.
 - UI Navigation State Machine Diagram.png
 
 ### Sequence Diagrams
-- Login/ProfileManagement.png
-- Manual Bolus.png
-- Extended Bolus.png
-- Basal Delivery.png
-- Navigation/History/Logging.png
-- Charging/ErrorHandling.png
+- 1) Login&ProfileManagement.png
+- 2) ValidatePin.png
+- 3) ExtendedBolus.png
+- 4) ManualBolus.png
+- 5) BasalDelivery.png
+- 6) Battery.png
+- 7) ErrorHandling.png
+- 8) Navigation&History.png
+- 9) OptionsPageConfiguration.png
 
 ## Project Repository
 - Qt/C++ Project: Insulin-Pump-Sim
