@@ -1,4 +1,4 @@
-#include "OptionsPageController.h"
+#include "optionspagecontroller.h"
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QGroupBox>

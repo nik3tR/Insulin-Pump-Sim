@@ -21,6 +21,8 @@
 #include "optionspagecontroller.h"
 #include "src/logic/insulindelivery.h"
 
+QT_CHARTS_USE_NAMESPACE
+
 class HomeScreenWidget : public QWidget {
     Q_OBJECT
 public:

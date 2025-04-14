@@ -13,6 +13,7 @@
 #include <QCheckBox>
 #include <QSpinBox>
 #include <QLabel>
+#include <QApplication>
 #include "src/dialogs/pindialog.h"
 #include "pumpsimulatormainwidget.h"
 #include "optionspagecontroller.h"
